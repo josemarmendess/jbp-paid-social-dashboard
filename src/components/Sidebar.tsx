@@ -109,9 +109,40 @@ export function Sidebar() {
         })}
       </nav>
 
+      <SidebarMascot />
+
       <div className="border-t border-[color:var(--color-border-subtle)] px-5 py-3 text-[10px] uppercase tracking-[0.08em] text-[color:var(--color-text-tertiary)]">
         Made for the JBP team
       </div>
     </aside>
+  );
+}
+
+/**
+ * Sidebar-anchored mascot — sits just above the "Made for the JBP team"
+ * footer at full opacity, gently breathing in place. Hides itself if the
+ * asset is missing so the layout stays clean.
+ */
+function SidebarMascot() {
+  const [ok, setOk] = useState(true);
+  if (!ok) return null;
+  return (
+    <div className="flex items-end justify-center px-2 pb-1 pt-2">
+      <Image
+        src="/mascot.png"
+        alt=""
+        width={220}
+        height={260}
+        onError={() => setOk(false)}
+        className="block h-auto w-[140px] origin-bottom select-none [animation:jbp-pulse_3.5s_ease-in-out_infinite]"
+        style={{ filter: "drop-shadow(0 4px 12px rgba(26,15,11,0.10))" }}
+      />
+      <style>{`
+        @keyframes jbp-pulse {
+          0%, 100% { transform: scale(1); }
+          50% { transform: scale(1.025); }
+        }
+      `}</style>
+    </div>
   );
 }

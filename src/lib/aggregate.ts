@@ -277,20 +277,22 @@ export function computePivotMetrics(
     leads += Number(r.results) || 0;
   }
   let bookedJobs = 0;
-  let revenue = 0;
+  // We use the ServiceTitan "Sales" column as the canonical revenue figure
+  // because that's what the Overview KPIs surface as "Sales Revenue". Using
+  // the "Revenue" column here would split the dashboard's source of truth.
+  let salesTotal = 0;
   let soldCount = 0;
-  let soldRevenueOnly = 0;
+  let soldSalesOnly = 0;
   let cancelledCount = 0;
   for (const r of st) {
     if (!inRange(r["Creation Date"], range)) continue;
     if (!buMatches(r, bu)) continue;
     bookedJobs += 1;
-    const rev = Number(r["Revenue"]) || 0;
     const sale = Number(r["Sales"]) || 0;
-    revenue += rev;
+    salesTotal += sale;
     if (sale > 0) {
       soldCount += 1;
-      soldRevenueOnly += sale;
+      soldSalesOnly += sale;
     }
     if (isCancelled(r["Job Status"])) cancelledCount += 1;
   }
@@ -300,9 +302,9 @@ export function computePivotMetrics(
     costPerLead: leads > 0 ? spend / leads : null,
     bookedJobs,
     costPerBookedJob: bookedJobs > 0 ? spend / bookedJobs : null,
-    revenue,
-    spendOnRevenue: revenue > 0 ? (spend / revenue) * 100 : null,
-    averageSaleValue: soldCount > 0 ? soldRevenueOnly / soldCount : null,
+    revenue: salesTotal,
+    spendOnRevenue: salesTotal > 0 ? (spend / salesTotal) * 100 : null,
+    averageSaleValue: soldCount > 0 ? soldSalesOnly / soldCount : null,
     cancellationRate:
       bookedJobs > 0 ? (cancelledCount / bookedJobs) * 100 : null,
   };
@@ -732,7 +734,9 @@ export function computeOverviewKpis(
     bookedJobs: s.booked,
     soldJobs: s.sold,
     sales: s.sales,
-    spendOnRevenue: s.revenue > 0 ? m.spend / s.revenue : 0,
+    // Use Sales (the canonical "Sales Revenue") so this KPI matches the
+    // pivot table's Spend on Revenue row.
+    spendOnRevenue: s.sales > 0 ? m.spend / s.sales : 0,
     ctr: m.impressions > 0 ? m.linkClicks / m.impressions : 0,
     leadRate: m.linkClicks > 0 ? m.leads / m.linkClicks : 0,
     bookRate: m.leads > 0 ? s.booked / m.leads : 0,

@@ -1,6 +1,5 @@
 import { Suspense } from "react";
 import { Sidebar } from "@/components/Sidebar";
-import { MascotWatermark } from "@/components/MascotWatermark";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   return (
@@ -11,7 +10,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <div className="flex min-h-screen flex-1 flex-col lg:pl-[224px]">
         {children}
       </div>
-      <MascotWatermark />
     </div>
   );
 }
