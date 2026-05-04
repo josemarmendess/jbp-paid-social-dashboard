@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTransition } from "react";
 import {
   Select,
@@ -29,12 +29,13 @@ export function DateRangePicker({
 }: DateRangePickerProps) {
   const router = useRouter();
   const params = useSearchParams();
+  const pathname = usePathname() ?? "/";
   const [pending, startTransition] = useTransition();
 
   function pushQuery(next: URLSearchParams) {
     const query = next.toString();
     startTransition(() => {
-      router.replace(query ? `/?${query}` : "/", { scroll: false });
+      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
     });
   }
 

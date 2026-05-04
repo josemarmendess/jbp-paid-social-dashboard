@@ -595,6 +595,153 @@ export function aggregateByZip(
   return Array.from(byZip.values()).sort((a, b) => b.leads - a.leads);
 }
 
+/**
+ * Per-day KPI series for the past N days. One row per date, with the raw
+ * counts needed to derive every Overview KPI. The page derives ratios on
+ * the client to keep this function generic.
+ */
+export interface DailyKpiPoint {
+  date: string;
+  spend: number;
+  impressions: number;
+  linkClicks: number;
+  leads: number;
+  bookedJobs: number;
+  soldJobs: number;
+  completedJobs: number;
+  cancelledJobs: number;
+  revenue: number;
+  sales: number;
+}
+
+export function dailyKpiSeries(
+  meta: MetaInsightRow[],
+  st: ServiceTitanRow[],
+  dates: string[],
+  bu: BusinessUnit,
+): DailyKpiPoint[] {
+  const idx = new Map<string, DailyKpiPoint>();
+  for (const d of dates) {
+    idx.set(d, {
+      date: d,
+      spend: 0,
+      impressions: 0,
+      linkClicks: 0,
+      leads: 0,
+      bookedJobs: 0,
+      soldJobs: 0,
+      completedJobs: 0,
+      cancelledJobs: 0,
+      revenue: 0,
+      sales: 0,
+    });
+  }
+  for (const r of meta) {
+    const p = idx.get(r.date);
+    if (!p) continue;
+    p.spend += Number(r.spend) || 0;
+    p.impressions += Number(r.impressions) || 0;
+    p.linkClicks += Number(r.link_clicks) || 0;
+    p.leads += Number(r.results) || 0;
+  }
+  for (const r of st) {
+    const p = idx.get(String(r["Creation Date"] ?? ""));
+    if (!p) continue;
+    if (!buMatches(r, bu)) continue;
+    p.bookedJobs += 1;
+    const sale = Number(r["Sales"]) || 0;
+    p.revenue += Number(r["Revenue"]) || 0;
+    p.sales += sale;
+    if (sale > 0) p.soldJobs += 1;
+    const status = String(r["Job Status"] ?? "").toLowerCase();
+    if (status.includes("complet")) p.completedJobs += 1;
+    if (isCancelled(r["Job Status"])) p.cancelledJobs += 1;
+  }
+  return dates.map((d) => idx.get(d)!);
+}
+
+/**
+ * The 12 Overview KPIs in the order the spec lays out: 6 volume metrics
+ * then 6 rate metrics. Each metric returns current + previous totals plus a
+ * 30-day sparkline series (numeric, undefined slots are 0). Ratio metrics
+ * compute totals on summed components, not averages of daily ratios.
+ */
+export interface OverviewKpiTotals {
+  spend: number;
+  leads: number;
+  bookedJobs: number;
+  soldJobs: number;
+  sales: number;
+  spendOnRevenue: number; // 0-1 (spend/revenue), 0 when no revenue
+  ctr: number; // link_clicks / impressions
+  leadRate: number; // leads / link_clicks
+  bookRate: number; // booked / leads
+  showRate: number; // completed / booked
+  closeRate: number; // sold / booked
+  cancellationRate: number; // cancelled / booked
+}
+
+function totalize(rows: ServiceTitanRow[], range: DateRange, bu: BusinessUnit) {
+  let booked = 0;
+  let sold = 0;
+  let completed = 0;
+  let cancelled = 0;
+  let revenue = 0;
+  let sales = 0;
+  for (const r of rows) {
+    if (!inRange(r["Creation Date"], range)) continue;
+    if (!buMatches(r, bu)) continue;
+    booked += 1;
+    const sale = Number(r["Sales"]) || 0;
+    sales += sale;
+    revenue += Number(r["Revenue"]) || 0;
+    if (sale > 0) sold += 1;
+    const status = String(r["Job Status"] ?? "").toLowerCase();
+    if (status.includes("complet")) completed += 1;
+    if (isCancelled(r["Job Status"])) cancelled += 1;
+  }
+  return { booked, sold, completed, cancelled, revenue, sales };
+}
+
+function metaTotals(rows: MetaInsightRow[], range: DateRange) {
+  let spend = 0;
+  let leads = 0;
+  let impressions = 0;
+  let linkClicks = 0;
+  for (const r of rows) {
+    if (!inRange(r.date, range)) continue;
+    spend += Number(r.spend) || 0;
+    leads += Number(r.results) || 0;
+    impressions += Number(r.impressions) || 0;
+    linkClicks += Number(r.link_clicks) || 0;
+  }
+  return { spend, leads, impressions, linkClicks };
+}
+
+export function computeOverviewKpis(
+  meta: MetaInsightRow[],
+  st: ServiceTitanRow[],
+  range: DateRange,
+  bu: BusinessUnit,
+): OverviewKpiTotals {
+  const m = metaTotals(meta, range);
+  const s = totalize(st, range, bu);
+  return {
+    spend: m.spend,
+    leads: m.leads,
+    bookedJobs: s.booked,
+    soldJobs: s.sold,
+    sales: s.sales,
+    spendOnRevenue: s.revenue > 0 ? m.spend / s.revenue : 0,
+    ctr: m.impressions > 0 ? m.linkClicks / m.impressions : 0,
+    leadRate: m.linkClicks > 0 ? m.leads / m.linkClicks : 0,
+    bookRate: m.leads > 0 ? s.booked / m.leads : 0,
+    showRate: s.booked > 0 ? s.completed / s.booked : 0,
+    closeRate: s.booked > 0 ? s.sold / s.booked : 0,
+    cancellationRate: s.booked > 0 ? s.cancelled / s.booked : 0,
+  };
+}
+
 export interface AdSeven {
   adName: string;
   series: number[]; // last 7 days of spend (oldest first)

@@ -1,6 +1,6 @@
 "use client";
 
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTransition } from "react";
 import {
   Select,
@@ -18,6 +18,7 @@ interface BusinessUnitFilterProps {
 export function BusinessUnitFilter({ options, value }: BusinessUnitFilterProps) {
   const router = useRouter();
   const params = useSearchParams();
+  const pathname = usePathname() ?? "/";
   const [pending, startTransition] = useTransition();
 
   function onChange(next: string | null) {
@@ -26,7 +27,7 @@ export function BusinessUnitFilter({ options, value }: BusinessUnitFilterProps) 
     else sp.set("bu", next);
     const query = sp.toString();
     startTransition(() => {
-      router.replace(query ? `/?${query}` : "/", { scroll: false });
+      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
     });
   }
 
