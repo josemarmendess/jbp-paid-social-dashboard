@@ -3,6 +3,8 @@ import { KpiCard } from "@/components/KpiCard";
 import { CarryoverPipelineCard } from "@/components/CarryoverPipelineCard";
 import { AdPerformanceTable } from "@/components/AdPerformanceTable";
 import { CampaignPerformanceTable } from "@/components/CampaignPerformanceTable";
+import { CreativePerformanceGrid } from "@/components/CreativePerformanceGrid";
+import { GeographicMap } from "@/components/GeographicMap";
 import { PivotTable } from "@/components/PivotTable";
 import { DailyTrendChart } from "@/components/DailyTrendChart";
 import { FunnelChart } from "@/components/FunnelChart";
@@ -13,6 +15,8 @@ import { getPeriod, parsePreset } from "@/lib/dateRange";
 import {
   aggregateByAd,
   aggregateByCampaign,
+  aggregateByZip,
+  buildAdSevenDaySpend,
   cancellationRateSeries,
   computeCarryoverPipeline,
   computeFunnel,
@@ -168,6 +172,18 @@ export default async function Page({ searchParams }: PageProps) {
   // Static-period subtitle for trend chart label.
   const last30Range = getRollingRange(30);
 
+  // Phase B: Geographic map + creative grid
+  const zipRows = aggregateByZip(
+    data.meta_insights,
+    data.servicetitan_social_leads,
+    period.current,
+    bu,
+  );
+  const sevenDayDates = rollingDaysList(7);
+  const sevenDayMap = buildAdSevenDaySpend(data.meta_insights, sevenDayDates);
+  const sevenDayRecord: Record<string, number[]> = {};
+  for (const [k, v] of sevenDayMap) sevenDayRecord[k] = v;
+
   return (
     <main className="flex flex-1 flex-col">
       <Header
@@ -298,6 +314,37 @@ export default async function Page({ searchParams }: PageProps) {
             </p>
           </div>
           <AdPerformanceTable rows={ads} />
+        </section>
+
+        <section
+          aria-label="Geographic performance"
+          className="flex flex-col gap-3"
+        >
+          <div className="flex items-baseline justify-between">
+            <h2 className="text-lg font-medium tracking-tight">
+              Geographic Performance
+            </h2>
+            <p className="text-xs text-muted-foreground tabular-nums">
+              {period.current.startStr} → {period.current.endStr} · {zipRows.length}{" "}
+              {zipRows.length === 1 ? "ZIP" : "ZIPs"}
+            </p>
+          </div>
+          <GeographicMap rows={zipRows} />
+        </section>
+
+        <section
+          aria-label="Creative performance"
+          className="flex flex-col gap-3"
+        >
+          <div className="flex items-baseline justify-between">
+            <h2 className="text-lg font-medium tracking-tight">
+              Creative Performance
+            </h2>
+            <p className="text-xs text-muted-foreground tabular-nums">
+              {period.current.startStr} → {period.current.endStr}
+            </p>
+          </div>
+          <CreativePerformanceGrid ads={ads} sevenDay={sevenDayRecord} />
         </section>
       </div>
     </main>
