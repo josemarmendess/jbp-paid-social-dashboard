@@ -1,7 +1,8 @@
 import { TopHeader } from "@/components/TopHeader";
 import { KpiCard } from "@/components/KpiCard";
-import { PivotTable } from "@/components/PivotTable";
+import { PivotTable, PivotCustomize } from "@/components/PivotTable";
 import { DailyTrendChart } from "@/components/DailyTrendChart";
+import { DayOfWeekChart } from "@/components/DayOfWeekChart";
 import { FunnelChart } from "@/components/FunnelChart";
 import { CancellationRateChart } from "@/components/CancellationRateChart";
 import { AnomalyBanner } from "@/components/AnomalyBanner";
@@ -34,6 +35,10 @@ import {
   formatPercent,
 } from "@/lib/format";
 import { METRIC_DEFS } from "@/lib/metricDefinitions";
+import {
+  parsePivotColKeys,
+  parsePivotRowKeys,
+} from "@/lib/pivotConfig";
 import { goalChip, parseGoalTargets } from "@/lib/goals";
 import type { PaidSocialPayload } from "@/lib/types";
 
@@ -46,6 +51,8 @@ interface PageProps {
     end?: string;
     bu?: string;
     view?: string;
+    pivotRows?: string;
+    pivotCols?: string;
     cplTarget?: string;
     roasTarget?: string;
     cancelTarget?: string;
@@ -112,8 +119,16 @@ export default async function Page({ searchParams }: PageProps) {
   const anomalies = detectAnomalies(anomalyRows);
 
   const pivotPeriods = getPivotPeriods();
+  const visibleRowKeys = parsePivotRowKeys(sp.pivotRows);
+  const visibleColKeys = parsePivotColKeys(
+    sp.pivotCols,
+    pivotPeriods.map((p) => p.key),
+  );
   const last30Range = getRollingRange(30);
-  const trendDates = rollingDaysList(30);
+  // Daily trend: pull 90 days so the chart's window selector (7/14/30/60/90)
+  // can zoom without a server round-trip.
+  const trendDates = rollingDaysList(90);
+  const dowDates = rollingDaysList(30);
 
   // Build per-slice data once. Each slice holds its current/previous KPIs,
   // 30d sparkline series, pivot row values, and the trend chart inputs.
@@ -167,6 +182,12 @@ export default async function Page({ searchParams }: PageProps) {
       trendDates,
       slice.bu,
     );
+    const dowSeries = dailyKpiSeries(
+      data!.meta_insights,
+      data!.servicetitan_social_leads,
+      dowDates,
+      slice.bu,
+    );
     const funnel = computeFunnel(
       data!.meta_insights,
       data!.servicetitan_social_leads,
@@ -193,6 +214,7 @@ export default async function Page({ searchParams }: PageProps) {
       sparks,
       pivotValues,
       trend,
+      dowSeries,
       funnel,
       weeklyAll,
       monthlyAll,
@@ -358,14 +380,21 @@ export default async function Page({ searchParams }: PageProps) {
           aria-label="Performance over time"
           className="flex flex-col gap-3"
         >
-          <SectionHeader
-            title="Performance Over Time"
-            subtitle={
-              slices.length > 1
-                ? `${slices.length} services · stacked`
-                : "All times America/Chicago"
-            }
-          />
+          <div className="flex flex-wrap items-baseline justify-between gap-3">
+            <SectionHeader
+              title="Performance Over Time"
+              subtitle={
+                slices.length > 1
+                  ? `${slices.length} ${slices.length === 1 ? "view" : "views"} · stacked`
+                  : "All times America/Chicago"
+              }
+            />
+            <PivotCustomize
+              columns={pivotPeriods.map((p) => ({ key: p.key, label: p.label }))}
+              visibleRowKeys={visibleRowKeys}
+              visibleColKeys={visibleColKeys}
+            />
+          </div>
           <div className="flex flex-col gap-4">
             {sliceData.map(({ slice, pivotValues }) => (
               <PivotTable
@@ -373,6 +402,8 @@ export default async function Page({ searchParams }: PageProps) {
                 periods={pivotPeriods}
                 values={pivotValues}
                 caption={slices.length > 1 ? slice.label : undefined}
+                visibleRowKeys={visibleRowKeys}
+                visibleColKeys={visibleColKeys}
               />
             ))}
           </div>
@@ -393,31 +424,54 @@ export default async function Page({ searchParams }: PageProps) {
           ) : null}
         </section>
 
-        {/* Trends row — single shared row in combined view, duplicated per slice in split. */}
-        <section aria-label="Trends" className="flex flex-col gap-3">
+        {/* Trends — full-width daily chart, 2-up funnel/cancellation, day-of-week. */}
+        <section aria-label="Trends" className="flex flex-col gap-4">
           <SectionHeader title="Trends" />
-          {sliceData.map(({ slice, trend, funnel, weeklyAll, monthlyAll }) => (
-            <div key={`trends-${slice.key}`} className="flex flex-col gap-3">
-              {slices.length > 1 ? <SliceHeader label={slice.label} subtle /> : null}
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          {sliceData.map(
+            ({
+              slice,
+              trend,
+              dowSeries,
+              funnel,
+              weeklyAll,
+              monthlyAll,
+            }) => (
+              <div key={`trends-${slice.key}`} className="flex flex-col gap-4">
+                {slices.length > 1 ? (
+                  <SliceHeader label={slice.label} subtle />
+                ) : null}
                 <ChartCard
                   title="Daily Spend vs Revenue"
-                  caption={`${last30Range.startStr} → ${last30Range.endStr}`}
+                  caption={`${trendDates[0]} → ${last30Range.endStr} · adjustable window`}
                 >
                   <DailyTrendChart data={trend} />
                 </ChartCard>
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                  <ChartCard
+                    title="Conversion Funnel"
+                    caption={`${period.current.startStr} → ${period.current.endStr}`}
+                  >
+                    <FunnelChart metrics={funnel} />
+                  </ChartCard>
+                  <ChartCard
+                    title="Cancellation Rate"
+                    caption="Current vs previous"
+                  >
+                    <CancellationRateChart
+                      weekly={weeklyAll}
+                      monthly={monthlyAll}
+                    />
+                  </ChartCard>
+                </div>
                 <ChartCard
-                  title="Funnel"
-                  caption={`${period.current.startStr} → ${period.current.endStr}`}
+                  title="By Day of Week"
+                  caption="Trailing 30 days"
                 >
-                  <FunnelChart metrics={funnel} />
-                </ChartCard>
-                <ChartCard title="Cancellation Rate" caption="Current vs previous">
-                  <CancellationRateChart weekly={weeklyAll} monthly={monthlyAll} />
+                  <DayOfWeekChart rows={dowSeries} />
                 </ChartCard>
               </div>
-            </div>
-          ))}
+            ),
+          )}
         </section>
       </div>
     </main>

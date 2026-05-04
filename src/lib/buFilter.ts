@@ -46,10 +46,12 @@ export function buListLabel(list: string[]): string {
 
 import { CANONICAL_SERVICES } from "./serviceTaxonomy";
 
-export type ServiceView = "combined" | "split";
+export type ServiceView = "combined" | "split" | "all";
 
 export function parseView(raw: string | undefined): ServiceView {
-  return raw === "split" ? "split" : "combined";
+  if (raw === "split") return "split";
+  if (raw === "all") return "all";
+  return "combined";
 }
 
 export interface ServiceSlice {
@@ -66,18 +68,33 @@ export interface ServiceSlice {
  * page should render. Each slice produces one group of KPIs / one chart line /
  * one pivot table, depending on the consumer.
  *
- *  - combined view: one slice that aggregates whatever is in `selected`
- *    (or all services when selected is empty).
- *  - split view: one slice per service in `selected` (or per canonical
- *    service when selected is empty).
+ *  - combined: one slice aggregating whatever is in `selected` (or all
+ *    services when selected is empty).
+ *  - split: one slice per service in `selected` (or per canonical service
+ *    when selected is empty). NO combined total appended.
+ *  - all: per-service slices PLUS a combined "Total" slice at the end. Best
+ *    for Slack-pasted reports that want all three views at once.
  */
 export function getServiceSlices(
   selected: string[],
   view: ServiceView,
 ): ServiceSlice[] {
+  const perService = (selected.length > 0 ? selected : [...CANONICAL_SERVICES]).map(
+    (s) => ({ label: s, key: s, bu: [s] as string[] }),
+  );
+
   if (view === "split") {
-    const services = selected.length > 0 ? selected : [...CANONICAL_SERVICES];
-    return services.map((s) => ({ label: s, key: s, bu: [s] }));
+    return perService;
+  }
+  if (view === "all") {
+    const totalLabel =
+      selected.length > 0 && selected.length < CANONICAL_SERVICES.length
+        ? `Total · ${selected.join(" + ")}`
+        : "Total · all services";
+    return [
+      ...perService,
+      { label: totalLabel, key: "total", bu: selected },
+    ];
   }
   // Combined.
   if (selected.length === 0) {

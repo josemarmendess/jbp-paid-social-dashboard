@@ -1,7 +1,7 @@
 "use client";
 
 import { useTransition } from "react";
-import { Layers, Square } from "lucide-react";
+import { Layers, LayoutList, Square } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
 import type { ServiceView } from "@/lib/buFilter";
@@ -10,10 +10,36 @@ interface ServiceViewToggleProps {
   view: ServiceView;
 }
 
+const OPTIONS: ReadonlyArray<{
+  key: ServiceView;
+  label: string;
+  Icon: typeof Square;
+  hint: string;
+}> = [
+  {
+    key: "combined",
+    label: "Combined",
+    Icon: Square,
+    hint: "Combined view — totals only",
+  },
+  {
+    key: "split",
+    label: "Per service",
+    Icon: Layers,
+    hint: "Per service — Bathrooms vs Sewers side by side",
+  },
+  {
+    key: "all",
+    label: "All",
+    Icon: LayoutList,
+    hint: "Both — per service AND combined total",
+  },
+];
+
 /**
- * "Combined" vs "Per service" toggle in the global header. Drives every
- * data visualization on every page — when "split" is on, each visual element
- * gets duplicated per service (Bathrooms / Sewers).
+ * View mode toggle in the global header. Three states drive every data
+ * visualization: combined (single rollup), split (one per service), all
+ * (per service + combined total — best for Slack-pasted reports).
  */
 export function ServiceViewToggle({ view }: ServiceViewToggleProps) {
   const router = useRouter();
@@ -43,34 +69,26 @@ export function ServiceViewToggle({ view }: ServiceViewToggleProps) {
       role="group"
       aria-label="Service view"
     >
-      <button
-        type="button"
-        onClick={() => setView("combined")}
-        title="Combined view — totals only"
-        className={cn(
-          "inline-flex items-center gap-1.5 rounded-[5px] px-2.5 py-1 text-[12px] font-medium transition-colors",
-          view === "combined"
-            ? "bg-[color:var(--color-jbp-cream)] text-[color:var(--color-text-primary)] shadow-sm"
-            : "text-[color:var(--color-text-secondary)] hover:text-[color:var(--color-text-primary)]",
-        )}
-      >
-        <Square className="h-3 w-3" strokeWidth={2.25} aria-hidden="true" />
-        Combined
-      </button>
-      <button
-        type="button"
-        onClick={() => setView("split")}
-        title="Per service — Bathrooms vs Sewers side by side"
-        className={cn(
-          "inline-flex items-center gap-1.5 rounded-[5px] px-2.5 py-1 text-[12px] font-medium transition-colors",
-          view === "split"
-            ? "bg-[color:var(--color-jbp-cream)] text-[color:var(--color-text-primary)] shadow-sm"
-            : "text-[color:var(--color-text-secondary)] hover:text-[color:var(--color-text-primary)]",
-        )}
-      >
-        <Layers className="h-3 w-3" strokeWidth={2.25} aria-hidden="true" />
-        Per service
-      </button>
+      {OPTIONS.map((opt) => {
+        const active = view === opt.key;
+        return (
+          <button
+            key={opt.key}
+            type="button"
+            onClick={() => setView(opt.key)}
+            title={opt.hint}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-[5px] px-2.5 py-1 text-[12px] font-medium transition-colors",
+              active
+                ? "bg-[color:var(--color-jbp-cream)] text-[color:var(--color-text-primary)] shadow-sm"
+                : "text-[color:var(--color-text-secondary)] hover:text-[color:var(--color-text-primary)]",
+            )}
+          >
+            <opt.Icon className="h-3 w-3" strokeWidth={2.25} aria-hidden="true" />
+            {opt.label}
+          </button>
+        );
+      })}
     </div>
   );
 }
