@@ -1,3 +1,4 @@
+import { BusinessUnitFilter } from "@/components/BusinessUnitFilter";
 import { DateRangePicker } from "@/components/DateRangePicker";
 import { RefreshButton } from "@/components/RefreshButton";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -8,6 +9,8 @@ interface HeaderProps {
   preset: DateRangePreset;
   customStart?: string;
   customEnd?: string;
+  businessUnits: string[];
+  bu: string;
 }
 
 const chicagoFormatter = new Intl.DateTimeFormat("en-US", {
@@ -25,6 +28,8 @@ export function Header({
   preset,
   customStart,
   customEnd,
+  businessUnits,
+  bu,
 }: HeaderProps) {
   let lastUpdated = "—";
   try {
@@ -35,21 +40,31 @@ export function Header({
     lastUpdated = generatedAt;
   }
 
+  const filterActive = bu && bu !== "All";
+
   return (
     <header className="flex flex-col gap-3 border-b border-border/60 px-6 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-8">
       <div className="flex flex-col gap-1">
-        <h1 className="text-xl font-semibold tracking-tight">
-          Paid Social Dashboard
-        </h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-xl font-semibold tracking-tight">
+            Paid Social Dashboard
+          </h1>
+          {filterActive && (
+            <span className="inline-flex items-center rounded-full bg-zinc-900 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-zinc-50 dark:bg-zinc-100 dark:text-zinc-900">
+              Filtered: {bu}
+            </span>
+          )}
+        </div>
         <p className="text-xs text-muted-foreground tabular-nums">
           Last updated: {lastUpdated}
         </p>
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <BusinessUnitFilter options={businessUnits} value={bu} />
         <DateRangePicker
           initial={preset}
-          customStart={customStart}
-          customEnd={customEnd}
+          customStart={preset === "custom" ? customStart : undefined}
+          customEnd={preset === "custom" ? customEnd : undefined}
         />
         <RefreshButton />
         <ThemeToggle />
