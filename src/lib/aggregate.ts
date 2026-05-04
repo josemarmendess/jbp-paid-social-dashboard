@@ -9,8 +9,8 @@ import type {
 } from "./types";
 import {
   CANONICAL_SERVICES,
-  inferServiceFromText,
   normalizeService,
+  resolveAdService,
   type CanonicalService,
 } from "./serviceTaxonomy";
 
@@ -198,19 +198,14 @@ export function aggregateByAd(
     let agg = byAd.get(key);
     if (!agg) {
       const audience = detectAudience(r.campaign_name, r.ad_name);
-      // Service resolution priority (most → least confident):
-      //   1. Retargeting → always Sewers (business rule)
-      //   2. ServiceTitan most-common BU for this ad
-      //   3. Adset name keyword (ADV | BATHROOMS / SEWER ...)
-      //   4. Campaign name keyword
-      //   5. Ad name keyword
-      //   6. Default "Sewers"
-      const businessUnit: CanonicalService =
-        audience === "Retargeting"
-          ? "Sewers"
-          : (buMap.get(key) ??
-            inferServiceFromText(r.adset_name, r.campaign_name, r.ad_name) ??
-            "Sewers");
+      // Adset wins over ST attribution — see resolveAdService docs.
+      const businessUnit = resolveAdService(
+        key,
+        r.adset_name,
+        r.campaign_name,
+        audience,
+        (n) => buMap.get(n),
+      );
       agg = {
         adName: key,
         campaignName: r.campaign_name,
@@ -842,13 +837,8 @@ function metaTotals(rows: MetaInsightRow[], range: DateRange) {
  */
 /**
  * Returns a predicate that says whether a Meta row "belongs" to the given
- * BusinessUnit filter. Uses the same priority as aggregateByAd:
- *   1. Retargeting → Sewers
- *   2. ServiceTitan most-common BU for the ad
- *   3. inferServiceFromText(adset, campaign, ad) — picks up brand-new
- *      bathroom ads that haven't generated ST attribution yet.
- *   4. Default "Sewers"
- * The ST map is built once per call so callers can iterate Meta rows tightly.
+ * BusinessUnit filter. Single source of truth for the resolution chain
+ * lives in resolveAdService.
  */
 function makeMetaBuMatcher(
   st: ServiceTitanRow[],
@@ -863,12 +853,13 @@ function makeMetaBuMatcher(
     : [normalizeService(bu)];
   return (row) => {
     const audience = detectAudience(row.campaign_name, row.ad_name);
-    const svc: CanonicalService =
-      audience === "Retargeting"
-        ? "Sewers"
-        : (map.get(row.ad_name) ??
-          inferServiceFromText(row.adset_name, row.campaign_name, row.ad_name) ??
-          "Sewers");
+    const svc = resolveAdService(
+      row.ad_name,
+      row.adset_name,
+      row.campaign_name,
+      audience,
+      (n) => map.get(n),
+    );
     return want.includes(svc);
   };
 }
