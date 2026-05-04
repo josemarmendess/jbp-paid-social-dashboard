@@ -106,8 +106,11 @@ export interface AggregatedAd {
   campaignName: string;
   adsetName: string;
   audience: Audience;
-  /** Most common ServiceTitan Business Unit (across all time) for this ad. "Sewer" forced for any Retargeting ad per business rule. */
-  businessUnit: string;
+  /** Canonical service taxonomy: only "Bathrooms" or "Sewers". Anything not
+   * explicitly Bathrooms (Plumbing, Mitigation, Sewer, empty, ...) collapses
+   * to Sewers. Retargeting ads are always tagged Sewers per business rule.
+   * See lib/serviceTaxonomy.ts. */
+  businessUnit: "Bathrooms" | "Sewers";
   spend: number;
   impressions: number;
   linkClicks: number;

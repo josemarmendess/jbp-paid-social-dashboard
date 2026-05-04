@@ -26,7 +26,7 @@ export function AnomalyBanner({ anomalies }: AnomalyBannerProps) {
       </span>
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
         <p className="text-[12px] font-semibold text-[color:var(--color-text-primary)]">
-          Heads up · yesterday&apos;s data vs trailing 28-day baseline
+          Heads up · last 7 days vs prior 7 days
         </p>
         <ul className="flex flex-wrap gap-2">
           {top.map((a) => {

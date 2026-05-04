@@ -14,7 +14,11 @@ import {
 } from "@/lib/aggregate";
 import { chicagoTodayStr } from "@/lib/dateRange";
 import { getLastMonthRange } from "@/lib/periods";
-import { parseBuList } from "@/lib/buFilter";
+import {
+  getServiceSlices,
+  parseBuList,
+  parseView,
+} from "@/lib/buFilter";
 import { formatCurrency, formatInt } from "@/lib/format";
 import type { PaidSocialPayload } from "@/lib/types";
 
@@ -26,6 +30,7 @@ interface PageProps {
     start?: string;
     end?: string;
     bu?: string;
+    view?: string;
   }>;
 }
 
@@ -48,9 +53,10 @@ function formatLastUpdated(s: string) {
 const STALE_DAYS = 14;
 
 export default async function PipelinePage({ searchParams }: PageProps) {
-  const { range, start, end, bu: rawBu } = await searchParams;
-  const preset = parsePreset(range);
-  const period = getPeriod(preset, start, end);
+  const sp = await searchParams;
+  const preset = parsePreset(sp.range);
+  const period = getPeriod(preset, sp.start, sp.end);
+  const view = parseView(sp.view);
 
   let data: PaidSocialPayload | null = null;
   let fetchError: string | null = null;
@@ -71,15 +77,15 @@ export default async function PipelinePage({ searchParams }: PageProps) {
   }
 
   const businessUnits = listBusinessUnits(data.servicetitan_social_leads);
-  const bu = parseBuList(rawBu, businessUnits);
+  const bu = parseBuList(sp.bu, businessUnits);
+  const slices = getServiceSlices(bu, view);
 
   const lastMonth = getLastMonthRange();
-  const pipeline = computePipelineMetrics(
-    data.servicetitan_social_leads,
-    bu,
-    lastMonth,
-  );
 
+  // Stale bookings list ignores the view toggle — it's an actionable list,
+  // and surfacing the same stale jobs twice (once per service) would only
+  // add noise. We use the union BU filter so it still respects an active
+  // multi-select.
   const stale = getStaleBookings(
     data.servicetitan_social_leads,
     bu,
@@ -87,12 +93,38 @@ export default async function PipelinePage({ searchParams }: PageProps) {
     chicagoTodayStr(),
   );
 
-  // Long series so the chart can present any preset (up to 26w / 24mo) plus
-  // the matching "previous" comparison half.
-  const cancelWeekly = cancellationRateSeries(data.servicetitan_social_leads, bu, "week", 52);
-  const cancelMonthly = cancellationRateSeries(data.servicetitan_social_leads, bu, "month", 48);
-  const showWeekly = showRateSeries(data.servicetitan_social_leads, bu, "week", 52);
-  const showMonthly = showRateSeries(data.servicetitan_social_leads, bu, "month", 48);
+  const sliceData = slices.map((slice) => ({
+    slice,
+    pipeline: computePipelineMetrics(
+      data!.servicetitan_social_leads,
+      slice.bu,
+      lastMonth,
+    ),
+    cancelWeekly: cancellationRateSeries(
+      data!.servicetitan_social_leads,
+      slice.bu,
+      "week",
+      52,
+    ),
+    cancelMonthly: cancellationRateSeries(
+      data!.servicetitan_social_leads,
+      slice.bu,
+      "month",
+      48,
+    ),
+    showWeekly: showRateSeries(
+      data!.servicetitan_social_leads,
+      slice.bu,
+      "week",
+      52,
+    ),
+    showMonthly: showRateSeries(
+      data!.servicetitan_social_leads,
+      slice.bu,
+      "month",
+      48,
+    ),
+  }));
 
   return (
     <main className="flex flex-1 flex-col">
@@ -105,6 +137,7 @@ export default async function PipelinePage({ searchParams }: PageProps) {
         customEnd={preset === "custom" ? period.current.endStr : undefined}
         businessUnits={businessUnits}
         bu={bu}
+        view={view}
       />
       <div className="mx-auto flex w-full max-w-[1320px] flex-1 flex-col gap-6 px-6 py-6 sm:px-8">
         <div className="flex items-baseline justify-between">
@@ -116,43 +149,58 @@ export default async function PipelinePage({ searchParams }: PageProps) {
           </span>
         </div>
 
-        {/* KPI row */}
-        <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <PipelineKpiCard
-            label="Carryover Pipeline"
-            value={formatInt(pipeline.carryover)}
-            subtitle={`Last month leads still pending (${lastMonth.startStr} → ${lastMonth.endStr})`}
-            badge={
-              pipeline.carryover > 0
-                ? { tone: "warning", text: "Action" }
-                : { tone: "positive", text: "Clear" }
-            }
-          />
-          <PipelineKpiCard
-            label="Avg Days to Close"
-            value={
-              pipeline.avgDaysToClose != null
-                ? `${pipeline.avgDaysToClose.toFixed(1)}d`
-                : "—"
-            }
-            subtitle="Creation Date → Sold On"
-          />
-          <PipelineKpiCard
-            label="Avg Days to Complete"
-            value={
-              pipeline.avgDaysToComplete != null
-                ? `${pipeline.avgDaysToComplete.toFixed(1)}d`
-                : "—"
-            }
-            subtitle="Sold On → Completed On"
-          />
-          <PipelineKpiCard
-            label="Pipeline Value"
-            value={formatCurrency(pipeline.pendingValue)}
-            subtitle={`${formatInt(pipeline.totalPipelineCount)} pending × avg sale value`}
-            badge={{ tone: "neutral", text: "Estimate" }}
-          />
-        </section>
+        {/* KPI row — duplicated per slice when split. */}
+        {sliceData.map(({ slice, pipeline }) => (
+          <section key={`pipe-${slice.key}`} className="flex flex-col gap-3">
+            {slices.length > 1 ? (
+              <div className="flex items-center gap-3">
+                <span
+                  className="font-display text-[color:var(--color-text-primary)]"
+                  style={{ fontSize: 15, letterSpacing: "0.06em" }}
+                >
+                  {slice.label}
+                </span>
+                <span className="h-[1px] flex-1 bg-[color:var(--color-border-subtle)]" />
+              </div>
+            ) : null}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <PipelineKpiCard
+                label="Carryover Pipeline"
+                value={formatInt(pipeline.carryover)}
+                subtitle={`Last month leads still pending (${lastMonth.startStr} → ${lastMonth.endStr})`}
+                badge={
+                  pipeline.carryover > 0
+                    ? { tone: "warning", text: "Action" }
+                    : { tone: "positive", text: "Clear" }
+                }
+              />
+              <PipelineKpiCard
+                label="Avg Days to Close"
+                value={
+                  pipeline.avgDaysToClose != null
+                    ? `${pipeline.avgDaysToClose.toFixed(1)}d`
+                    : "—"
+                }
+                subtitle="Creation Date → Sold On"
+              />
+              <PipelineKpiCard
+                label="Avg Days to Complete"
+                value={
+                  pipeline.avgDaysToComplete != null
+                    ? `${pipeline.avgDaysToComplete.toFixed(1)}d`
+                    : "—"
+                }
+                subtitle="Sold On → Completed On"
+              />
+              <PipelineKpiCard
+                label="Pipeline Value"
+                value={formatCurrency(pipeline.pendingValue)}
+                subtitle={`${formatInt(pipeline.totalPipelineCount)} pending × avg sale value`}
+                badge={{ tone: "neutral", text: "Estimate" }}
+              />
+            </div>
+          </section>
+        ))}
 
         {/* Stale bookings */}
         <section className="flex flex-col gap-3">
@@ -170,36 +218,56 @@ export default async function PipelinePage({ searchParams }: PageProps) {
           <StaleBookingsTable rows={stale} />
         </section>
 
-        {/* Trend rows */}
-        <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <div className="rounded-lg border border-[color:var(--color-border-subtle)] bg-white p-4">
-            <div className="flex items-baseline justify-between">
-              <h3 className="text-[13px] font-semibold text-[color:var(--color-text-primary)]">
-                Cancellation Rate Trend
-              </h3>
-              <span className="text-[11px] tabular-nums text-[color:var(--color-text-tertiary)]">
-                Current vs previous
-              </span>
-            </div>
-            <CancellationRateChart weekly={cancelWeekly} monthly={cancelMonthly} />
-          </div>
-          <div className="rounded-lg border border-[color:var(--color-border-subtle)] bg-white p-4">
-            <div className="flex items-baseline justify-between">
-              <h3 className="text-[13px] font-semibold text-[color:var(--color-text-primary)]">
-                Show Rate Trend
-              </h3>
-              <span className="text-[11px] tabular-nums text-[color:var(--color-text-tertiary)]">
-                Current vs previous · higher is better
-              </span>
-            </div>
-            <CancellationRateChart
-              weekly={showWeekly}
-              monthly={showMonthly}
-              currentColor="var(--color-positive)"
-              higherIsBetter
-            />
-          </div>
-        </section>
+        {/* Trend rows — also per slice. */}
+        {sliceData.map(
+          ({ slice, cancelWeekly, cancelMonthly, showWeekly, showMonthly }) => (
+            <section
+              key={`pipe-trends-${slice.key}`}
+              className="flex flex-col gap-3"
+            >
+              {slices.length > 1 ? (
+                <div className="flex items-center gap-3">
+                  <span className="text-[12px] font-semibold uppercase tracking-[0.08em] text-[color:var(--color-text-secondary)]">
+                    {slice.label} · Trends
+                  </span>
+                  <span className="h-[1px] flex-1 bg-[color:var(--color-border-subtle)]" />
+                </div>
+              ) : null}
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <div className="rounded-lg border border-[color:var(--color-border-subtle)] bg-white p-4">
+                  <div className="flex items-baseline justify-between">
+                    <h3 className="text-[13px] font-semibold text-[color:var(--color-text-primary)]">
+                      Cancellation Rate Trend
+                    </h3>
+                    <span className="text-[11px] tabular-nums text-[color:var(--color-text-tertiary)]">
+                      Current vs previous
+                    </span>
+                  </div>
+                  <CancellationRateChart
+                    weekly={cancelWeekly}
+                    monthly={cancelMonthly}
+                  />
+                </div>
+                <div className="rounded-lg border border-[color:var(--color-border-subtle)] bg-white p-4">
+                  <div className="flex items-baseline justify-between">
+                    <h3 className="text-[13px] font-semibold text-[color:var(--color-text-primary)]">
+                      Show Rate Trend
+                    </h3>
+                    <span className="text-[11px] tabular-nums text-[color:var(--color-text-tertiary)]">
+                      Current vs previous · higher is better
+                    </span>
+                  </div>
+                  <CancellationRateChart
+                    weekly={showWeekly}
+                    monthly={showMonthly}
+                    currentColor="var(--color-positive)"
+                    higherIsBetter
+                  />
+                </div>
+              </div>
+            </section>
+          ),
+        )}
       </div>
     </main>
   );

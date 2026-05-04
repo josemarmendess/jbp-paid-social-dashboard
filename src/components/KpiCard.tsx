@@ -69,7 +69,7 @@ export function KpiCard({
       </div>
       <span
         className="font-mono font-semibold tabular-nums text-[color:var(--color-text-primary)]"
-        style={{ fontSize: "30px", lineHeight: 1.1, letterSpacing: "-0.01em" }}
+        style={{ fontSize: "32px", lineHeight: 1.1, letterSpacing: "-0.01em" }}
       >
         {value}
       </span>
@@ -86,7 +86,7 @@ export function KpiCard({
       </div>
       {sparkline && sparkline.length > 0 ? (
         <div className="-mb-1 mt-auto">
-          <Sparkline values={sparkline} height={24} width={140} />
+          <Sparkline values={sparkline} height={28} width={140} />
         </div>
       ) : null}
       {hint ? (

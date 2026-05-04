@@ -12,7 +12,7 @@ import {
   listBusinessUnits,
 } from "@/lib/aggregate";
 import { rollingDaysList } from "@/lib/periods";
-import { parseBuList } from "@/lib/buFilter";
+import { parseBuList, parseView } from "@/lib/buFilter";
 import type {
   MetaAdCreativeRow,
   PaidSocialPayload,
@@ -26,6 +26,7 @@ interface PageProps {
     start?: string;
     end?: string;
     bu?: string;
+    view?: string;
   }>;
 }
 
@@ -47,9 +48,10 @@ function formatLastUpdated(generatedAt: string): string {
 }
 
 export default async function PerformancePage({ searchParams }: PageProps) {
-  const { range, start, end, bu: rawBu } = await searchParams;
-  const preset = parsePreset(range);
-  const period = getPeriod(preset, start, end);
+  const sp = await searchParams;
+  const preset = parsePreset(sp.range);
+  const period = getPeriod(preset, sp.start, sp.end);
+  const view = parseView(sp.view);
 
   let data: PaidSocialPayload | null = null;
   let fetchError: string | null = null;
@@ -71,7 +73,7 @@ export default async function PerformancePage({ searchParams }: PageProps) {
   }
 
   const businessUnits = listBusinessUnits(data.servicetitan_social_leads);
-  const bu = parseBuList(rawBu, businessUnits);
+  const bu = parseBuList(sp.bu, businessUnits);
   const lastUpdated = formatLastUpdated(data.generated_at);
 
   const allAds = aggregateByAd(
@@ -130,6 +132,8 @@ export default async function PerformancePage({ searchParams }: PageProps) {
         customEnd={preset === "custom" ? period.current.endStr : undefined}
         businessUnits={businessUnits}
         bu={bu}
+        view={view}
+        showViewToggle={false}
       />
 
       <div className="mx-auto flex w-full max-w-[1320px] flex-1 flex-col gap-5 px-6 py-6 sm:px-8">

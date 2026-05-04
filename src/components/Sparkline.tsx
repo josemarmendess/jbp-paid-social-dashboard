@@ -14,8 +14,8 @@ interface SparklineProps {
  */
 export function Sparkline({
   values,
-  width = 120,
-  height = 28,
+  width = 140,
+  height = 32,
   stroke,
   showBaseline = true,
 }: SparklineProps) {

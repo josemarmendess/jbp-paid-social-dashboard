@@ -4,7 +4,11 @@ import { ErrorBanner } from "@/components/ErrorBanner";
 import { fetchPaidSocialData } from "@/lib/fetchData";
 import { getPeriod, parsePreset } from "@/lib/dateRange";
 import { listBusinessUnits, monthlyKpiSeries } from "@/lib/aggregate";
-import { parseBuList } from "@/lib/buFilter";
+import {
+  getServiceSlices,
+  parseBuList,
+  parseView,
+} from "@/lib/buFilter";
 import type { PaidSocialPayload } from "@/lib/types";
 
 export const revalidate = 1800;
@@ -15,6 +19,7 @@ interface PageProps {
     start?: string;
     end?: string;
     bu?: string;
+    view?: string;
     months?: string;
   }>;
 }
@@ -39,6 +44,7 @@ export default async function HistoryPage({ searchParams }: PageProps) {
   const sp = await searchParams;
   const preset = parsePreset(sp.range);
   const period = getPeriod(preset, sp.start, sp.end);
+  const view = parseView(sp.view);
   const monthsBack = Math.max(3, Math.min(36, Number(sp.months) || 12));
 
   let data: PaidSocialPayload | null = null;
@@ -61,13 +67,17 @@ export default async function HistoryPage({ searchParams }: PageProps) {
 
   const businessUnits = listBusinessUnits(data.servicetitan_social_leads);
   const bu = parseBuList(sp.bu, businessUnits);
-
-  const rows = monthlyKpiSeries(
-    data.meta_insights,
-    data.servicetitan_social_leads,
-    bu,
-    monthsBack,
-  );
+  const slices = getServiceSlices(bu, view);
+  const sliceData = slices.map((slice) => ({
+    label: slice.label,
+    key: slice.key,
+    rows: monthlyKpiSeries(
+      data!.meta_insights,
+      data!.servicetitan_social_leads,
+      slice.bu,
+      monthsBack,
+    ),
+  }));
 
   return (
     <main className="flex flex-1 flex-col">
@@ -80,6 +90,7 @@ export default async function HistoryPage({ searchParams }: PageProps) {
         customEnd={preset === "custom" ? period.current.endStr : undefined}
         businessUnits={businessUnits}
         bu={bu}
+        view={view}
       />
       <div className="mx-auto flex w-full max-w-[1320px] flex-1 flex-col gap-5 px-6 py-6 sm:px-8">
         <div className="flex items-baseline justify-between">
@@ -90,10 +101,13 @@ export default async function HistoryPage({ searchParams }: PageProps) {
             America/Chicago
           </span>
         </div>
-        <HistoryView rows={rows} />
+        <HistoryView slices={sliceData} split={view === "split"} />
         <p className="text-[11px] text-[color:var(--color-text-tertiary)]">
-          Window length is configurable via URL: <code className="rounded bg-[color:var(--color-surface-hover)] px-1 py-0.5 font-mono">?months=24</code>{" "}
-          (3–36).
+          Window length is configurable via URL:{" "}
+          <code className="rounded bg-[color:var(--color-surface-hover)] px-1 py-0.5 font-mono">
+            ?months=24
+          </code>{" "}
+          (3-36).
         </p>
       </div>
     </main>

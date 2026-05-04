@@ -1,20 +1,21 @@
 import { BusinessUnitFilter } from "@/components/BusinessUnitFilter";
 import { DateRangePicker } from "@/components/DateRangePicker";
 import { RefreshButton } from "@/components/RefreshButton";
-import { buListLabel } from "@/lib/buFilter";
+import { ServiceViewToggle } from "@/components/ServiceViewToggle";
+import { buListLabel, type ServiceView } from "@/lib/buFilter";
 import type { DateRangePreset } from "@/lib/types";
 
 interface TopHeaderProps {
   pageTitle: string;
-  /** Right-aligned subtitle: "Last updated …" string (page is responsible for formatting). */
   lastUpdated: string;
   preset: DateRangePreset;
   customStart?: string;
   customEnd?: string;
   businessUnits: string[];
-  /** Selected services. Empty array = "All services". */
   bu: string[];
-  /** Optional breadcrumb that sits above the title. */
+  view: ServiceView;
+  /** Set to false on pages that don't support the per-service split view. */
+  showViewToggle?: boolean;
   breadcrumb?: string;
 }
 
@@ -31,6 +32,8 @@ export function TopHeader({
   customEnd,
   businessUnits,
   bu,
+  view,
+  showViewToggle = true,
   breadcrumb,
 }: TopHeaderProps) {
   const filterActive = bu.length > 0;
@@ -74,6 +77,7 @@ export function TopHeader({
           customEnd={preset === "custom" ? customEnd : undefined}
         />
         <BusinessUnitFilter options={businessUnits} value={bu} />
+        {showViewToggle ? <ServiceViewToggle view={view} /> : null}
         <RefreshButton />
         <UserAvatar />
       </div>

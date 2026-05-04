@@ -1,44 +1,130 @@
 "use client";
 
-import { useId, useState } from "react";
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import { createPortal } from "react-dom";
 import { Info } from "lucide-react";
+
+const noopSubscribe = () => () => {};
+function useIsMounted(): boolean {
+  // useSyncExternalStore returns false during SSR and true on the client,
+  // mirroring the "isMounted" pattern without the lint warning that calling
+  // setState in an effect would trigger.
+  return useSyncExternalStore(
+    noopSubscribe,
+    () => true,
+    () => false,
+  );
+}
 
 interface TooltipProps {
   content: React.ReactNode;
   children: React.ReactNode;
-  /** "top" | "bottom" — defaults to "top". */
-  side?: "top" | "bottom";
 }
 
+interface PopoverCoords {
+  top: number;
+  left: number;
+  arrowX: number;
+  side: "top" | "bottom";
+}
+
+const TOOLTIP_W = 280;
+const VIEWPORT_MARGIN = 8;
+
 /**
- * Lightweight CSS-driven tooltip. Hover or focus the trigger to reveal a
- * dark popover with the metric definition. No portal so layout stays simple;
- * tooltips are short single-paragraph definitions.
+ * Hover/focus tooltip that renders into a portal so it can never be clipped
+ * by an `overflow: hidden` ancestor. Position is computed relative to the
+ * trigger and clamped to the viewport. Flips above/below based on space.
  */
-export function Tooltip({ content, children, side = "top" }: TooltipProps) {
+export function Tooltip({ content, children }: TooltipProps) {
   const id = useId();
+  const triggerRef = useRef<HTMLSpanElement>(null);
+  const tooltipRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
+  const [coords, setCoords] = useState<PopoverCoords | null>(null);
+  const mounted = useIsMounted();
+
+  // Recompute position when the tooltip opens.
+  useLayoutEffect(() => {
+    if (!open || !triggerRef.current) return;
+    const triggerRect = triggerRef.current.getBoundingClientRect();
+    const tooltipH = tooltipRef.current?.offsetHeight ?? 60;
+    const triggerCx = triggerRect.left + triggerRect.width / 2;
+    // Clamp left/right.
+    const halfW = TOOLTIP_W / 2;
+    const minLeft = VIEWPORT_MARGIN;
+    const maxLeft = window.innerWidth - VIEWPORT_MARGIN - TOOLTIP_W;
+    const idealLeft = triggerCx - halfW;
+    const left = Math.max(minLeft, Math.min(idealLeft, maxLeft));
+    const arrowX = Math.max(8, Math.min(triggerCx - left, TOOLTIP_W - 8));
+    // Decide above or below based on available space.
+    const spaceAbove = triggerRect.top;
+    const spaceBelow = window.innerHeight - triggerRect.bottom;
+    const fitsAbove = spaceAbove >= tooltipH + 12;
+    const side: "top" | "bottom" = fitsAbove || spaceAbove > spaceBelow ? "top" : "bottom";
+    const top =
+      side === "top"
+        ? triggerRect.top - tooltipH - 8
+        : triggerRect.bottom + 8;
+    setCoords({ top, left, arrowX, side });
+  }, [open]);
+
+  // Recompute on scroll/resize while open so the tooltip tracks the trigger.
+  useEffect(() => {
+    if (!open) return;
+    const onScroll = () => setOpen(false);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onScroll);
+    return () => {
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onScroll);
+    };
+  }, [open]);
+
   return (
     <span
+      ref={triggerRef}
       className="relative inline-flex items-center"
       onMouseEnter={() => setOpen(true)}
       onMouseLeave={() => setOpen(false)}
       onFocus={() => setOpen(true)}
       onBlur={() => setOpen(false)}
+      aria-describedby={open ? id : undefined}
     >
-      <span aria-describedby={open ? id : undefined}>{children}</span>
-      {open ? (
-        <span
-          role="tooltip"
-          id={id}
-          className={[
-            "pointer-events-none absolute left-1/2 z-50 w-[260px] -translate-x-1/2 rounded-md border border-[color:var(--color-border-strong)] bg-[color:var(--color-text-primary)] px-3 py-2 text-[11px] leading-snug text-white shadow-lg",
-            side === "top" ? "bottom-[calc(100%+8px)]" : "top-[calc(100%+8px)]",
-          ].join(" ")}
-        >
-          {content}
-        </span>
-      ) : null}
+      {children}
+      {mounted && open && coords
+        ? createPortal(
+            <div
+              ref={tooltipRef}
+              role="tooltip"
+              id={id}
+              className="pointer-events-none fixed z-[100] rounded-md border border-[color:var(--color-border-strong)] bg-[color:var(--color-text-primary)] px-3 py-2 text-[12px] leading-snug text-white shadow-xl"
+              style={{
+                top: coords.top,
+                left: coords.left,
+                width: TOOLTIP_W,
+              }}
+            >
+              <span
+                aria-hidden="true"
+                className="absolute h-2 w-2 rotate-45 bg-[color:var(--color-text-primary)]"
+                style={{
+                  left: coords.arrowX - 4,
+                  [coords.side === "top" ? "bottom" : "top"]: -4,
+                }}
+              />
+              {content}
+            </div>,
+            document.body,
+          )
+        : null}
     </span>
   );
 }
@@ -46,17 +132,10 @@ export function Tooltip({ content, children, side = "top" }: TooltipProps) {
 interface MetricLabelProps {
   label: string;
   tooltip: React.ReactNode;
-  /** Larger info icon for big headers. Default 12. */
   iconSize?: number;
-  /** Forwarded class on the wrapper (label colour, weight, casing). */
   className?: string;
 }
 
-/**
- * Small Info icon next to a metric label that expands its definition on hover.
- * Used by KPI cards, the pivot table, and any other surface that shows a
- * short metric name.
- */
 export function MetricLabel({
   label,
   tooltip,
@@ -64,7 +143,11 @@ export function MetricLabel({
   className,
 }: MetricLabelProps) {
   return (
-    <span className={["inline-flex items-center gap-1", className].filter(Boolean).join(" ")}>
+    <span
+      className={["inline-flex items-center gap-1", className]
+        .filter(Boolean)
+        .join(" ")}
+    >
       <span>{label}</span>
       <Tooltip content={tooltip}>
         <Info

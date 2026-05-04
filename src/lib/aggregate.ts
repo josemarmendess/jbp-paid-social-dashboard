@@ -7,6 +7,11 @@ import type {
   MetaInsightRow,
   ServiceTitanRow,
 } from "./types";
+import {
+  CANONICAL_SERVICES,
+  normalizeService,
+  type CanonicalService,
+} from "./serviceTaxonomy";
 
 /**
  * Filter for ServiceTitan rows by Business Unit. Accepts:
@@ -19,22 +24,26 @@ export type BusinessUnit = "All" | string | string[];
 
 function buMatches(row: ServiceTitanRow, bu: BusinessUnit): boolean {
   if (!bu || bu === "All") return true;
-  const v = String(row["Business Unit"] ?? "").toLowerCase();
+  // Normalize first so "Plumbing" / "Mitigation" / "Sewer" all collapse
+  // into the canonical "Sewers" before the comparison.
+  const v = normalizeService(row["Business Unit"]);
   if (Array.isArray(bu)) {
     if (bu.length === 0) return true;
-    return bu.some((b) => b.toLowerCase() === v);
+    return bu.some((b) => normalizeService(b) === v);
   }
-  return v === bu.toLowerCase();
+  return v === normalizeService(bu);
 }
 
-/** Distinct, sorted Business Unit values found in ST data (excluding empties). */
-export function listBusinessUnits(st: ServiceTitanRow[]): string[] {
-  const set = new Set<string>();
-  for (const r of st) {
-    const v = String(r["Business Unit"] ?? "").trim();
-    if (v) set.add(v);
-  }
-  return Array.from(set).sort();
+/**
+ * Returns the canonical service taxonomy. The dashboard only knows two
+ * service lines — Bathrooms and Sewers — and remaps everything else into
+ * Sewers (see serviceTaxonomy.ts).
+ */
+export function listBusinessUnits(
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  st: ServiceTitanRow[],
+): string[] {
+  return [...CANONICAL_SERVICES];
 }
 
 function isCancelled(status: unknown): boolean {
@@ -119,12 +128,12 @@ export function computeKpiPair(
  * rows (not just the selected period) so an ad's service category stays stable
  * even when the period has zero matched ST rows.
  */
-function buildBusinessUnitMap(st: ServiceTitanRow[]): Map<string, string> {
-  const counts = new Map<string, Map<string, number>>();
+function buildBusinessUnitMap(st: ServiceTitanRow[]): Map<string, CanonicalService> {
+  const counts = new Map<string, Map<CanonicalService, number>>();
   for (const row of st) {
     const adName = row["UM Content"];
-    const bu = row["Business Unit"];
-    if (!adName || !bu) continue;
+    if (!adName) continue;
+    const bu = normalizeService(row["Business Unit"]);
     let inner = counts.get(adName);
     if (!inner) {
       inner = new Map();
@@ -132,9 +141,9 @@ function buildBusinessUnitMap(st: ServiceTitanRow[]): Map<string, string> {
     }
     inner.set(bu, (inner.get(bu) ?? 0) + 1);
   }
-  const result = new Map<string, string>();
+  const result = new Map<string, CanonicalService>();
   for (const [adName, inner] of counts) {
-    let bestBu = "";
+    let bestBu: CanonicalService = "Sewers";
     let bestCount = -1;
     for (const [bu, c] of inner) {
       if (c > bestCount) {
@@ -188,8 +197,8 @@ export function aggregateByAd(
     let agg = byAd.get(key);
     if (!agg) {
       const audience = detectAudience(r.campaign_name, r.ad_name);
-      const businessUnit =
-        audience === "Retargeting" ? "Sewer" : (buMap.get(key) ?? "");
+      const businessUnit: CanonicalService =
+        audience === "Retargeting" ? "Sewers" : (buMap.get(key) ?? "Sewers");
       agg = {
         adName: key,
         campaignName: r.campaign_name,
@@ -305,10 +314,12 @@ export function computePivotMetrics(
   range: DateRange,
   bu: BusinessUnit,
 ): PivotMetrics {
+  const metaInBu = makeMetaBuMatcher(st, bu);
   let spend = 0;
   let leads = 0;
   for (const r of meta) {
     if (!inRange(r.date, range)) continue;
+    if (!metaInBu(r)) continue;
     spend += Number(r.spend) || 0;
     leads += Number(r.results) || 0;
   }
@@ -382,11 +393,13 @@ export function dailySpendVsRevenue(
   dates: string[],
   bu: BusinessUnit,
 ): DailySeriesPoint[] {
+  const metaInBu = makeMetaBuMatcher(st, bu);
   const idx = new Map<string, DailySeriesPoint>();
   for (const d of dates) idx.set(d, { date: d, spend: 0, revenue: 0 });
   for (const r of meta) {
     const p = idx.get(r.date);
     if (!p) continue;
+    if (!metaInBu(r)) continue;
     p.spend += Number(r.spend) || 0;
   }
   for (const r of st) {
@@ -412,11 +425,13 @@ export function computeFunnel(
   range: DateRange,
   bu: BusinessUnit,
 ): FunnelMetrics {
+  const metaInBu = makeMetaBuMatcher(st, bu);
   let impressions = 0;
   let linkClicks = 0;
   let leads = 0;
   for (const r of meta) {
     if (!inRange(r.date, range)) continue;
+    if (!metaInBu(r)) continue;
     impressions += Number(r.impressions) || 0;
     linkClicks += Number(r.link_clicks) || 0;
     leads += Number(r.results) || 0;
@@ -656,6 +671,7 @@ export function dailyKpiSeries(
   dates: string[],
   bu: BusinessUnit,
 ): DailyKpiPoint[] {
+  const metaInBu = makeMetaBuMatcher(st, bu);
   const idx = new Map<string, DailyKpiPoint>();
   for (const d of dates) {
     idx.set(d, {
@@ -675,6 +691,7 @@ export function dailyKpiSeries(
   for (const r of meta) {
     const p = idx.get(r.date);
     if (!p) continue;
+    if (!metaInBu(r)) continue;
     p.spend += Number(r.spend) || 0;
     p.impressions += Number(r.impressions) || 0;
     p.linkClicks += Number(r.link_clicks) || 0;
@@ -754,13 +771,78 @@ function metaTotals(rows: MetaInsightRow[], range: DateRange) {
   return { spend, leads, impressions, linkClicks };
 }
 
+/**
+ * Meta-level totals scoped to a specific Business Unit. Meta data is not
+ * tagged with a service line, so we attribute it via each ad's most-common
+ * ServiceTitan business unit (the same ad-level taxonomy used in
+ * aggregateByBusinessUnit). Net effect: in split-by-service views, the
+ * Spend / Leads / CTR / CPL numbers add up across services to match the
+ * combined view.
+ */
+/**
+ * Returns a predicate that says whether a Meta row "belongs" to the given
+ * BusinessUnit filter, based on the ad's most-common ServiceTitan service.
+ * The map is built once per call so callers can iterate Meta rows tightly.
+ * Pass empty / "All" for a no-op matcher.
+ */
+function makeMetaBuMatcher(
+  st: ServiceTitanRow[],
+  bu: BusinessUnit,
+): (row: MetaInsightRow) => boolean {
+  const isAll =
+    !bu || bu === "All" || (Array.isArray(bu) && bu.length === 0);
+  if (isAll) return () => true;
+  const map = buildBusinessUnitMap(st);
+  const want: CanonicalService[] = Array.isArray(bu)
+    ? bu.map((b) => normalizeService(b))
+    : [normalizeService(bu)];
+  return (row) => {
+    const svc = map.get(row.ad_name) ?? "Sewers";
+    return want.includes(svc);
+  };
+}
+
+function metaTotalsByBu(
+  meta: MetaInsightRow[],
+  st: ServiceTitanRow[],
+  range: DateRange,
+  bu: BusinessUnit,
+): { spend: number; leads: number; impressions: number; linkClicks: number } {
+  const isAll =
+    !bu ||
+    bu === "All" ||
+    (Array.isArray(bu) && bu.length === 0);
+  if (isAll) return metaTotals(meta, range);
+  const ads = aggregateByAd(meta, st, range);
+  const inBu = (adBu: string) => {
+    if (Array.isArray(bu)) {
+      return bu.some(
+        (b) => normalizeService(b) === normalizeService(adBu),
+      );
+    }
+    return normalizeService(bu) === normalizeService(adBu);
+  };
+  let spend = 0;
+  let leads = 0;
+  let impressions = 0;
+  let linkClicks = 0;
+  for (const a of ads) {
+    if (!inBu(a.businessUnit)) continue;
+    spend += a.spend;
+    leads += a.leads;
+    impressions += a.impressions;
+    linkClicks += a.linkClicks;
+  }
+  return { spend, leads, impressions, linkClicks };
+}
+
 export function computeOverviewKpis(
   meta: MetaInsightRow[],
   st: ServiceTitanRow[],
   range: DateRange,
   bu: BusinessUnit,
 ): OverviewKpiTotals {
-  const m = metaTotals(meta, range);
+  const m = metaTotalsByBu(meta, st, range, bu);
   const s = totalize(st, range, bu);
   return {
     spend: m.spend,
@@ -781,50 +863,45 @@ export function computeOverviewKpis(
 }
 
 /* ------------------------------- Anomalies ---------------------------------
- * Lightweight rule-based detector run on the trailing 30-day daily series.
- * For each metric we compute the trailing 28-day mean (excluding the last 2
- * days, which still shift) and flag the most recent day if it deviates by
- * more than 30%. The biggest mover is shown in a banner on the Overview.
+ * Compares the most recent 7 closed days against the 7 days before that.
+ * 7d vs 7d is more stable than yesterday-only, smooths out weekday seasonality,
+ * and gives the JBP team a meaningful "this week vs last week" callout.
+ * Today is excluded (still shifting); we use today-1..today-7 as "current"
+ * and today-8..today-14 as "previous".
  * --------------------------------------------------------------------------*/
 
 export interface Anomaly {
   metric: string;
   label: string;
-  /** Direction: "up" if current is higher than baseline, "down" if lower. */
   direction: "up" | "down";
-  /** True when the direction is bad for the business. */
   bad: boolean;
   current: number;
   baseline: number;
-  /** Relative change vs baseline: (current - baseline) / baseline. */
+  /** Relative change: (current - previous) / previous. */
   change: number;
-  /** Pre-formatted human description. */
   detail: string;
 }
 
 export function detectAnomalies(rows: DailyKpiPoint[]): Anomaly[] {
-  if (rows.length < 8) return [];
-  const recent = rows[rows.length - 2]; // exclude today (often 0/partial) and use yesterday
-  if (!recent) return [];
-  const baselineRows = rows.slice(0, -2); // exclude today + yesterday
-  if (baselineRows.length < 4) return [];
+  // Need at least 14 closed days + today. Drop today first.
+  if (rows.length < 15) return [];
+  const closed = rows.slice(0, -1); // exclude today (still partial)
+  if (closed.length < 14) return [];
 
-  function avg(getter: (r: DailyKpiPoint) => number, denom?: (r: DailyKpiPoint) => number): number {
-    if (denom) {
-      let n = 0;
-      let d = 0;
-      for (const r of baselineRows) {
-        n += getter(r);
-        d += denom(r);
-      }
-      return d > 0 ? n / d : 0;
-    }
-    let total = 0;
-    for (const r of baselineRows) total += getter(r);
-    return total / baselineRows.length;
+  const currentSlice = closed.slice(-7); // last 7 closed days
+  const previousSlice = closed.slice(-14, -7); // 7 days before that
+
+  function sumAvg(slice: DailyKpiPoint[], getter: (r: DailyKpiPoint) => number): number {
+    if (slice.length === 0) return 0;
+    return slice.reduce((acc, r) => acc + getter(r), 0) / slice.length;
   }
-
-  function curRatio(n: number, d: number): number {
+  function ratio(slice: DailyKpiPoint[], num: (r: DailyKpiPoint) => number, den: (r: DailyKpiPoint) => number): number {
+    let n = 0;
+    let d = 0;
+    for (const r of slice) {
+      n += num(r);
+      d += den(r);
+    }
     return d > 0 ? n / d : 0;
   }
 
@@ -840,53 +917,53 @@ export function detectAnomalies(rows: DailyKpiPoint[]): Anomaly[] {
       metric: "spend",
       label: "Spend",
       badOnUp: true,
-      current: recent.spend,
-      baseline: avg((r) => r.spend),
+      current: sumAvg(currentSlice, (r) => r.spend),
+      baseline: sumAvg(previousSlice, (r) => r.spend),
     },
     {
       metric: "leads",
       label: "Leads",
       badOnUp: false,
-      current: recent.leads,
-      baseline: avg((r) => r.leads),
+      current: sumAvg(currentSlice, (r) => r.leads),
+      baseline: sumAvg(previousSlice, (r) => r.leads),
     },
     {
       metric: "bookedJobs",
       label: "Booked Jobs",
       badOnUp: false,
-      current: recent.bookedJobs,
-      baseline: avg((r) => r.bookedJobs),
+      current: sumAvg(currentSlice, (r) => r.bookedJobs),
+      baseline: sumAvg(previousSlice, (r) => r.bookedJobs),
     },
     {
       metric: "ctr",
       label: "CTR",
       badOnUp: false,
-      current: curRatio(recent.linkClicks, recent.impressions),
-      baseline: avg((r) => r.linkClicks, (r) => r.impressions),
+      current: ratio(currentSlice, (r) => r.linkClicks, (r) => r.impressions),
+      baseline: ratio(previousSlice, (r) => r.linkClicks, (r) => r.impressions),
     },
     {
       metric: "leadRate",
       label: "Lead Rate",
       badOnUp: false,
-      current: curRatio(recent.leads, recent.linkClicks),
-      baseline: avg((r) => r.leads, (r) => r.linkClicks),
+      current: ratio(currentSlice, (r) => r.leads, (r) => r.linkClicks),
+      baseline: ratio(previousSlice, (r) => r.leads, (r) => r.linkClicks),
     },
     {
       metric: "bookRate",
       label: "Book Rate",
       badOnUp: false,
-      current: curRatio(recent.bookedJobs, recent.leads),
-      baseline: avg((r) => r.bookedJobs, (r) => r.leads),
+      current: ratio(currentSlice, (r) => r.bookedJobs, (r) => r.leads),
+      baseline: ratio(previousSlice, (r) => r.bookedJobs, (r) => r.leads),
     },
     {
       metric: "cancellationRate",
       label: "Cancellation Rate",
       badOnUp: true,
-      current: curRatio(recent.cancelledJobs, recent.bookedJobs),
-      baseline: avg((r) => r.cancelledJobs, (r) => r.bookedJobs),
+      current: ratio(currentSlice, (r) => r.cancelledJobs, (r) => r.bookedJobs),
+      baseline: ratio(previousSlice, (r) => r.cancelledJobs, (r) => r.bookedJobs),
     },
   ];
-  const THRESHOLD = 0.3; // 30% relative change
+  const THRESHOLD = 0.2; // 20% relative change — slightly looser than yesterday-only
   const out: Anomaly[] = [];
   for (const s of specs) {
     if (s.baseline <= 0) continue;
@@ -902,10 +979,9 @@ export function detectAnomalies(rows: DailyKpiPoint[]): Anomaly[] {
       current: s.current,
       baseline: s.baseline,
       change,
-      detail: `${s.label} ${direction === "up" ? "up" : "down"} ${Math.abs(change * 100).toFixed(0)}% vs trailing 28-day baseline.`,
+      detail: `${s.label} ${direction === "up" ? "up" : "down"} ${Math.abs(change * 100).toFixed(0)}% · last 7d vs prior 7d.`,
     });
   }
-  // Sort by absolute change descending so the biggest mover surfaces first.
   return out.sort((a, b) => Math.abs(b.change) - Math.abs(a.change));
 }
 
@@ -1275,7 +1351,9 @@ export function monthlyKpiSeries(
     });
   }
 
+  const metaInBu = makeMetaBuMatcher(st, bu);
   for (const r of meta) {
+    if (!metaInBu(r)) continue;
     const ms = r.date?.slice(0, 7);
     const b = ms && buckets.get(ms);
     if (!b) continue;

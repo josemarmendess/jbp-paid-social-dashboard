@@ -136,15 +136,9 @@ function SidebarMascot() {
         width={220}
         height={260}
         onError={() => setOk(false)}
-        className="block h-auto w-[140px] origin-bottom select-none [animation:jbp-pulse_3.5s_ease-in-out_infinite]"
+        className="block h-auto w-[140px] select-none"
         style={{ filter: "drop-shadow(0 4px 12px rgba(26,15,11,0.10))" }}
       />
-      <style>{`
-        @keyframes jbp-pulse {
-          0%, 100% { transform: scale(1); }
-          50% { transform: scale(1.025); }
-        }
-      `}</style>
     </div>
   );
 }
