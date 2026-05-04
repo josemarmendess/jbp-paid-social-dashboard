@@ -1,0 +1,98 @@
+export interface MetaInsightRow {
+  date: string;
+  account_id: number | string;
+  account_name: string;
+  campaign_name: string;
+  adset_name: string;
+  ad_name: string;
+  spend: number;
+  impressions: number;
+  frequency: number;
+  link_clicks: number;
+  inline_link_click_ctr: number;
+  cost_per_inline_link_click: number;
+  cpm: number;
+  results: number;
+  cost_per_result: number;
+  last_updated_at: string;
+}
+
+export interface ServiceTitanRow {
+  "Job Number": number | string;
+  "Creation Date": string;
+  "Campaign Name": string;
+  "Campaign Category": string;
+  "Campaign Definition": string;
+  "Booking Method": string;
+  "Job Status": string;
+  "Booked By": string;
+  "Zip Code": number | string;
+  "Sales": number;
+  "Revenue": number;
+  "Business Unit": string;
+  "UM Content": string;
+  "Sold On": string;
+  "Completed On": string;
+  [key: string]: unknown;
+}
+
+export interface PaidSocialPayload {
+  generated_at: string;
+  meta_account_id: number | string;
+  meta_insights: MetaInsightRow[];
+  servicetitan_social_leads: ServiceTitanRow[];
+}
+
+export type DateRangePreset =
+  | "today"
+  | "yesterday"
+  | "this_month"
+  | "last_month"
+  | "last_7"
+  | "last_30"
+  | "last_90"
+  | "custom";
+
+export interface DateRange {
+  startStr: string;
+  endStr: string;
+}
+
+export interface PeriodPair {
+  current: DateRange;
+  previous: DateRange;
+  label: string;
+  previousLabel: string;
+}
+
+export interface KpiTotals {
+  spend: number;
+  leads: number;
+  bookedJobs: number;
+  sales: number;
+  roas: number;
+  /** spend / sales — target <0.20 (i.e. ROAS >= 5x). 0 when sales == 0. */
+  spendOnSales: number;
+}
+
+export interface KpiWithDelta {
+  current: KpiTotals;
+  previous: KpiTotals;
+}
+
+export type Audience = "Retargeting" | "Prospecting";
+
+export interface AggregatedAd {
+  adName: string;
+  campaignName: string;
+  adsetName: string;
+  audience: Audience;
+  /** Most common ServiceTitan Business Unit (across all time) for this ad. "Sewer" forced for any Retargeting ad per business rule. */
+  businessUnit: string;
+  spend: number;
+  impressions: number;
+  linkClicks: number;
+  leads: number;
+  bookedJobs: number;
+  sales: number;
+}
