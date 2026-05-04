@@ -1,15 +1,28 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import type { CancellationPoint } from "@/lib/aggregate";
 import { cn } from "@/lib/utils";
 
-interface CancellationRateChartProps {
-  weekly: { current: CancellationPoint[]; previous: CancellationPoint[] };
-  monthly: { current: CancellationPoint[]; previous: CancellationPoint[] };
+interface RateTrendChartProps {
+  /** Full weekly series (oldest first). Should contain enough buckets to
+   *  cover the largest preset on either side (≥ 52 recommended for the
+   *  26-week comparison preset). */
+  weekly: CancellationPoint[];
+  /** Full monthly series (oldest first). ≥ 48 recommended for the 24-month preset. */
+  monthly: CancellationPoint[];
+  /** Color of the "current" line. Defaults to JBP red — used for
+   *  cancellation. Pipeline's Show Rate passes positive green. */
+  currentColor?: string;
+  /** Whether higher values are good (true → green) or bad (false → red).
+   *  Just changes the inline delta color, not the line color. */
+  higherIsBetter?: boolean;
 }
 
 type Granularity = "week" | "month";
+
+const WEEK_PRESETS = [4, 8, 12, 16, 26] as const;
+const MONTH_PRESETS = [3, 6, 12, 24] as const;
 
 function shortenWeekKey(k: string): string {
   return k.replace(/^\d{4}-/, "");
@@ -27,34 +40,66 @@ interface MergedPoint {
   previous: number | null;
 }
 
+/**
+ * Rate trend chart used by the Overview Cancellation card, the Pipeline
+ * Cancellation chart, and the Pipeline Show Rate chart. The user picks the
+ * granularity (Weekly / Monthly) AND the lookback (e.g., 8 vs 16 weeks);
+ * the chart auto-splits the series into "current N" vs "previous N" halves.
+ */
 export function CancellationRateChart({
   weekly,
   monthly,
-}: CancellationRateChartProps) {
+  currentColor = "var(--color-jbp-red)",
+  higherIsBetter = false,
+}: RateTrendChartProps) {
   const uid = useId();
   const [gran, setGran] = useState<Granularity>("week");
-  const data = gran === "week" ? weekly : monthly;
+  const [weeks, setWeeks] = useState<number>(8);
+  const [months, setMonths] = useState<number>(6);
+
+  const halfSize = gran === "week" ? weeks : months;
+  const fullSeries = gran === "week" ? weekly : monthly;
   const shorten = gran === "week" ? shortenWeekKey : shortenMonthKey;
 
-  const length = Math.max(data.current.length, data.previous.length);
+  // Take the most recent halfSize buckets as "current" and the prior halfSize
+  // as "previous". Falls back gracefully when the series is shorter.
+  const { current, previous } = useMemo(() => {
+    const cur = fullSeries.slice(-halfSize);
+    const prevStart = Math.max(0, fullSeries.length - halfSize * 2);
+    const prevEnd = Math.max(0, fullSeries.length - halfSize);
+    const prev = fullSeries.slice(prevStart, prevEnd);
+    return { current: cur, previous: prev };
+  }, [fullSeries, halfSize]);
+
+  const length = Math.max(current.length, previous.length);
   const merged: MergedPoint[] = Array.from({ length }, (_, i) => {
-    const cur = data.current[i];
-    const prev = data.previous[i];
+    const c = current[i];
+    const p = previous[i];
     return {
-      bucket: cur ? shorten(cur.bucket) : prev ? shorten(prev.bucket) : "",
-      current: cur?.rate ?? null,
-      previous: prev?.rate ?? null,
+      bucket: c ? shorten(c.bucket) : p ? shorten(p.bucket) : "",
+      current: c?.rate ?? null,
+      previous: p?.rate ?? null,
     };
   });
 
   const empty = merged.every((d) => d.current === null && d.previous === null);
 
-  const W = 540;
-  const H = 220;
-  const padL = 36;
+  // Period-over-period averages for the inline delta.
+  const avg = (arr: CancellationPoint[]) => {
+    const xs = arr.map((p) => p.rate).filter((r): r is number => r != null);
+    if (xs.length === 0) return null;
+    return xs.reduce((a, b) => a + b, 0) / xs.length;
+  };
+  const curAvg = avg(current);
+  const prevAvg = avg(previous);
+  const deltaPp = curAvg != null && prevAvg != null ? curAvg - prevAvg : null;
+
+  const W = 560;
+  const H = 240;
+  const padL = 40;
   const padR = 12;
   const padT = 12;
-  const padB = 28;
+  const padB = 30;
   const innerW = W - padL - padR;
   const innerH = H - padT - padB;
 
@@ -65,7 +110,6 @@ export function CancellationRateChart({
     ),
   );
   const niceMax = Math.ceil(maxRate / 10) * 10;
-
   const xStep = innerW / Math.max(1, merged.length - 1 || 1);
 
   const toPath = (key: "current" | "previous"): string => {
@@ -88,14 +132,29 @@ export function CancellationRateChart({
     y: padT + innerH - innerH * t,
   }));
 
+  const presets = gran === "week" ? WEEK_PRESETS : MONTH_PRESETS;
+  const granLabel = gran === "week" ? "weeks" : "months";
+
+  // Delta color: positive (good) is green; negative (bad) is red — orientation
+  // depends on whether higher is good for this metric.
+  let deltaColor: string | undefined;
+  let deltaText: string | null = null;
+  if (deltaPp != null) {
+    const goodDirection = higherIsBetter ? deltaPp >= 0 : deltaPp <= 0;
+    deltaColor = goodDirection
+      ? "var(--color-positive)"
+      : "var(--color-negative)";
+    deltaText = `${deltaPp >= 0 ? "+" : ""}${deltaPp.toFixed(1)} pp · ${halfSize}${granLabel.slice(0, 1)} avg`;
+  }
+
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3 text-[11px] text-[color:var(--color-text-secondary)]">
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-3 text-[12px] text-[color:var(--color-text-secondary)]">
           <span className="inline-flex items-center gap-1.5">
             <span
               className="inline-block h-[2px] w-3"
-              style={{ background: "var(--color-jbp-red)" }}
+              style={{ background: currentColor }}
             />
             Current
           </span>
@@ -106,37 +165,73 @@ export function CancellationRateChart({
             />
             Previous
           </span>
-        </div>
-        <div className="flex gap-0.5 rounded-md bg-[color:var(--color-surface-hover)] p-0.5">
-          {(["week", "month"] as const).map((g) => (
-            <button
-              key={g}
-              type="button"
-              onClick={() => setGran(g)}
-              className={cn(
-                "rounded-[5px] px-2 py-0.5 text-[11px] font-medium transition-colors",
-                gran === g
-                  ? "bg-white text-[color:var(--color-text-primary)] shadow-sm"
-                  : "text-[color:var(--color-text-secondary)] hover:text-[color:var(--color-text-primary)]",
-              )}
+          {deltaText ? (
+            <span
+              className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-semibold tabular-nums"
+              style={{
+                background: `color-mix(in srgb, ${deltaColor} 10%, transparent)`,
+                color: deltaColor,
+              }}
             >
-              {g === "week" ? "Weekly" : "Monthly"}
-            </button>
-          ))}
+              {deltaText}
+            </span>
+          ) : null}
+        </div>
+        <div className="flex items-center gap-2">
+          {/* Granularity toggle */}
+          <div className="flex gap-0.5 rounded-md bg-[color:var(--color-surface-hover)] p-0.5">
+            {(["week", "month"] as const).map((g) => (
+              <button
+                key={g}
+                type="button"
+                onClick={() => setGran(g)}
+                className={cn(
+                  "rounded-[5px] px-2.5 py-1 text-[11px] font-medium transition-colors",
+                  gran === g
+                    ? "bg-white text-[color:var(--color-text-primary)] shadow-sm"
+                    : "text-[color:var(--color-text-secondary)] hover:text-[color:var(--color-text-primary)]",
+                )}
+              >
+                {g === "week" ? "Weekly" : "Monthly"}
+              </button>
+            ))}
+          </div>
+          {/* Bucket-count preset */}
+          <div className="flex gap-0.5 rounded-md bg-[color:var(--color-surface-hover)] p-0.5">
+            {presets.map((n) => {
+              const active = (gran === "week" ? weeks : months) === n;
+              return (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() =>
+                    gran === "week" ? setWeeks(n) : setMonths(n)
+                  }
+                  className={cn(
+                    "rounded-[5px] px-2 py-1 text-[11px] font-medium tabular-nums transition-colors",
+                    active
+                      ? "bg-white text-[color:var(--color-text-primary)] shadow-sm"
+                      : "text-[color:var(--color-text-secondary)] hover:text-[color:var(--color-text-primary)]",
+                  )}
+                >
+                  {n}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
       {empty ? (
-        <div className="flex h-[180px] items-center justify-center text-[12px] text-[color:var(--color-text-tertiary)]">
+        <div className="flex h-[200px] items-center justify-center text-[12px] text-[color:var(--color-text-tertiary)]">
           Not enough data to render this chart.
         </div>
       ) : (
         <svg
           viewBox={`0 0 ${W} ${H}`}
-          className="h-[180px] w-full"
+          className="h-[200px] w-full"
           role="img"
-          aria-label="Cancellation rate trend"
+          aria-label="Rate trend"
         >
-          {/* grid */}
           {yTicks.map((t, i) => (
             <line
               key={`g${i}-${uid}`}
@@ -153,14 +248,13 @@ export function CancellationRateChart({
               x={padL - 6}
               y={t.y + 4}
               textAnchor="end"
-              fontSize="10"
+              fontSize="11"
               fill="var(--color-text-tertiary)"
               className="font-mono"
             >
               {Math.round(t.v)}%
             </text>
           ))}
-          {/* previous (dashed) */}
           {toPath("previous") ? (
             <path
               d={toPath("previous")}
@@ -170,32 +264,29 @@ export function CancellationRateChart({
               strokeDasharray="4 3"
             />
           ) : null}
-          {/* current */}
           {toPath("current") ? (
             <path
               d={toPath("current")}
               fill="none"
-              stroke="var(--color-jbp-red)"
-              strokeWidth={2}
+              stroke={currentColor}
+              strokeWidth={2.25}
               strokeLinecap="round"
               strokeLinejoin="round"
             />
           ) : null}
-          {/* current dots */}
           {merged.map((d, i) =>
             d.current === null ? null : (
               <circle
                 key={`c${i}-${uid}`}
                 cx={padL + i * xStep}
                 cy={padT + innerH - (d.current / niceMax) * innerH}
-                r={2.5}
-                fill="var(--color-jbp-red)"
+                r={2.75}
+                fill={currentColor}
               >
                 <title>{`${d.bucket}: ${d.current.toFixed(1)}%`}</title>
               </circle>
             ),
           )}
-          {/* x labels */}
           {merged.map((d, i) =>
             i % Math.max(1, Math.ceil(merged.length / 6)) === 0 ||
             i === merged.length - 1 ? (
@@ -204,7 +295,7 @@ export function CancellationRateChart({
                 x={padL + i * xStep}
                 y={H - 8}
                 textAnchor="middle"
-                fontSize="10"
+                fontSize="11"
                 fill="var(--color-text-tertiary)"
                 className="font-mono"
               >

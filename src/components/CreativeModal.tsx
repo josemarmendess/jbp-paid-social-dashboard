@@ -5,6 +5,7 @@ import { ExternalLink, X } from "lucide-react";
 import type { AggregatedAd, MetaAdCreativeRow } from "@/lib/types";
 import { Sparkline } from "@/components/Sparkline";
 import { CreativeThumb } from "@/components/CreativeThumb";
+import { Tooltip } from "@/components/Tooltip";
 import {
   formatCurrency,
   formatInt,
@@ -46,6 +47,13 @@ export function CreativeModal({
 
   const previewSrc = creative?.thumbnail_url || creative?.image_url;
   const adsManagerUrl = creative?.permalink_url;
+  // Direct link to the underlying media (image/video). Falls back through
+  // common field names; kept undefined when nothing is available so the
+  // button shows a disabled tooltip explaining what unlocks it.
+  const mediaUrl =
+    (creative as { media_url?: string } | undefined)?.media_url ||
+    (creative as { video_url?: string } | undefined)?.video_url ||
+    creative?.image_url;
 
   return (
     <div
@@ -99,17 +107,44 @@ export function CreativeModal({
                 {creative.body}
               </p>
             ) : null}
-            {adsManagerUrl ? (
-              <a
-                href={adsManagerUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md bg-[color:var(--color-jbp-blue)] px-3 text-[12px] font-semibold text-white transition-colors hover:bg-[color:var(--color-jbp-blue-hover)]"
-              >
-                View in Ads Manager
-                <ExternalLink className="h-3 w-3" />
-              </a>
-            ) : null}
+            <div className="flex flex-wrap gap-2">
+              {mediaUrl ? (
+                <a
+                  href={mediaUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-[color:var(--color-border-subtle)] bg-white px-3 text-[12px] font-semibold text-[color:var(--color-text-primary)] transition-colors hover:bg-[color:var(--color-surface-hover)]"
+                >
+                  Open media
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+              ) : (
+                <Tooltip content="Disabled — enable by adding image_url, video_url, or media_url to the meta_ad_creatives feed.">
+                  <span className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-[color:var(--color-border-subtle)] bg-[color:var(--color-jbp-cream)]/60 px-3 text-[12px] font-medium text-[color:var(--color-text-tertiary)]">
+                    Open media
+                    <ExternalLink className="h-3 w-3" />
+                  </span>
+                </Tooltip>
+              )}
+              {adsManagerUrl ? (
+                <a
+                  href={adsManagerUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md bg-[color:var(--color-jbp-blue)] px-3 text-[12px] font-semibold text-white transition-colors hover:bg-[color:var(--color-jbp-blue-hover)]"
+                >
+                  View in Ads Manager
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+              ) : (
+                <Tooltip content="Disabled — enable by adding permalink_url to the meta_ad_creatives feed.">
+                  <span className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md bg-[color:var(--color-jbp-blue)]/30 px-3 text-[12px] font-semibold text-white">
+                    View in Ads Manager
+                    <ExternalLink className="h-3 w-3" />
+                  </span>
+                </Tooltip>
+              )}
+            </div>
           </div>
 
           {/* Metric grid */}

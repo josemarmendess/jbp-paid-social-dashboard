@@ -14,6 +14,7 @@ import {
 } from "@/lib/aggregate";
 import { chicagoTodayStr } from "@/lib/dateRange";
 import { getLastMonthRange } from "@/lib/periods";
+import { parseBuList } from "@/lib/buFilter";
 import { formatCurrency, formatInt } from "@/lib/format";
 import type { PaidSocialPayload } from "@/lib/types";
 
@@ -26,12 +27,6 @@ interface PageProps {
     end?: string;
     bu?: string;
   }>;
-}
-
-function normalizeBu(raw: string | undefined, options: string[]): string {
-  if (!raw || raw === "All") return "All";
-  const match = options.find((o) => o.toLowerCase() === raw.toLowerCase());
-  return match ?? "All";
 }
 
 const chicagoFormatter = new Intl.DateTimeFormat("en-US", {
@@ -76,7 +71,7 @@ export default async function PipelinePage({ searchParams }: PageProps) {
   }
 
   const businessUnits = listBusinessUnits(data.servicetitan_social_leads);
-  const bu = normalizeBu(rawBu, businessUnits);
+  const bu = parseBuList(rawBu, businessUnits);
 
   const lastMonth = getLastMonthRange();
   const pipeline = computePipelineMetrics(
@@ -92,27 +87,12 @@ export default async function PipelinePage({ searchParams }: PageProps) {
     chicagoTodayStr(),
   );
 
-  // Trend series (16 weekly buckets / 12 monthly buckets, split current vs previous half)
-  const cancelWeekly = cancellationRateSeries(data.servicetitan_social_leads, bu, "week", 16);
-  const cancelMonthly = cancellationRateSeries(data.servicetitan_social_leads, bu, "month", 12);
-  const splitCancelW = {
-    previous: cancelWeekly.slice(0, Math.max(0, cancelWeekly.length - 8)),
-    current: cancelWeekly.slice(-8),
-  };
-  const splitCancelM = {
-    previous: cancelMonthly.slice(0, Math.max(0, cancelMonthly.length - 6)),
-    current: cancelMonthly.slice(-6),
-  };
-  const showWeekly = showRateSeries(data.servicetitan_social_leads, bu, "week", 16);
-  const showMonthly = showRateSeries(data.servicetitan_social_leads, bu, "month", 12);
-  const splitShowW = {
-    previous: showWeekly.slice(0, Math.max(0, showWeekly.length - 8)),
-    current: showWeekly.slice(-8),
-  };
-  const splitShowM = {
-    previous: showMonthly.slice(0, Math.max(0, showMonthly.length - 6)),
-    current: showMonthly.slice(-6),
-  };
+  // Long series so the chart can present any preset (up to 26w / 24mo) plus
+  // the matching "previous" comparison half.
+  const cancelWeekly = cancellationRateSeries(data.servicetitan_social_leads, bu, "week", 52);
+  const cancelMonthly = cancellationRateSeries(data.servicetitan_social_leads, bu, "month", 48);
+  const showWeekly = showRateSeries(data.servicetitan_social_leads, bu, "week", 52);
+  const showMonthly = showRateSeries(data.servicetitan_social_leads, bu, "month", 48);
 
   return (
     <main className="flex flex-1 flex-col">
@@ -201,7 +181,7 @@ export default async function PipelinePage({ searchParams }: PageProps) {
                 Current vs previous
               </span>
             </div>
-            <CancellationRateChart weekly={splitCancelW} monthly={splitCancelM} />
+            <CancellationRateChart weekly={cancelWeekly} monthly={cancelMonthly} />
           </div>
           <div className="rounded-lg border border-[color:var(--color-border-subtle)] bg-white p-4">
             <div className="flex items-baseline justify-between">
@@ -209,10 +189,15 @@ export default async function PipelinePage({ searchParams }: PageProps) {
                 Show Rate Trend
               </h3>
               <span className="text-[11px] tabular-nums text-[color:var(--color-text-tertiary)]">
-                Current vs previous
+                Current vs previous · higher is better
               </span>
             </div>
-            <CancellationRateChart weekly={splitShowW} monthly={splitShowM} />
+            <CancellationRateChart
+              weekly={showWeekly}
+              monthly={showMonthly}
+              currentColor="var(--color-positive)"
+              higherIsBetter
+            />
           </div>
         </section>
       </div>

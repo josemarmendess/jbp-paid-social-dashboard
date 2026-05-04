@@ -9,15 +9,21 @@ import type {
 } from "./types";
 
 /**
- * "All" lets the caller skip ServiceTitan business-unit filtering. Any other
- * string is matched case-insensitively against ST's `Business Unit` column.
- * Meta rows are NEVER filtered by BU — Meta data has no BU tagging.
+ * Filter for ServiceTitan rows by Business Unit. Accepts:
+ *  - "All" / empty array → no filtering
+ *  - single string → equality match (case-insensitive)
+ *  - string[] (>=1) → row matches if its BU is in the list
+ * Meta rows are never filtered (Meta data has no BU tagging).
  */
-export type BusinessUnit = "All" | string;
+export type BusinessUnit = "All" | string | string[];
 
 function buMatches(row: ServiceTitanRow, bu: BusinessUnit): boolean {
   if (!bu || bu === "All") return true;
   const v = String(row["Business Unit"] ?? "").toLowerCase();
+  if (Array.isArray(bu)) {
+    if (bu.length === 0) return true;
+    return bu.some((b) => b.toLowerCase() === v);
+  }
   return v === bu.toLowerCase();
 }
 
@@ -141,11 +147,39 @@ function buildBusinessUnitMap(st: ServiceTitanRow[]): Map<string, string> {
   return result;
 }
 
+/**
+ * Per-request memo. The Performance page calls aggregateByAd transitively
+ * three times (directly + via aggregateByAdset + via aggregateByBusinessUnit).
+ * Memoizing by (meta, st, range) reference avoids re-walking the meta rows
+ * each time. Cache lives only for the lifetime of the request because the
+ * meta/st arrays come from a fresh fetch on every server render.
+ */
+const adAggCache = new WeakMap<
+  MetaInsightRow[],
+  Map<string, AggregatedAd[]>
+>();
+
+function adCacheKey(st: ServiceTitanRow[], range: DateRange): string {
+  // st reference isn't part of the WeakMap key but should disambiguate
+  // pages that build different ST slices over the same meta array.
+  // We rely on shared ST identity per request, which the fetch layer gives us.
+  return `${range.startStr}|${range.endStr}|${st.length}`;
+}
+
 export function aggregateByAd(
   meta: MetaInsightRow[],
   st: ServiceTitanRow[],
   range: DateRange,
 ): AggregatedAd[] {
+  let bucket = adAggCache.get(meta);
+  if (!bucket) {
+    bucket = new Map();
+    adAggCache.set(meta, bucket);
+  }
+  const key = adCacheKey(st, range);
+  const cached = bucket.get(key);
+  if (cached) return cached;
+
   const buMap = buildBusinessUnitMap(st);
   const byAd = new Map<string, AggregatedAd>();
   for (const r of meta) {
@@ -197,7 +231,9 @@ export function aggregateByAd(
     agg.sales += Number(row["Sales"]) || 0;
   }
 
-  return Array.from(byAd.values()).sort((a, b) => b.sales - a.sales);
+  const result = Array.from(byAd.values()).sort((a, b) => b.sales - a.sales);
+  bucket.set(key, result);
+  return result;
 }
 
 /* ---------- v2 additions: BU-filtered metrics, pivot rows, charts ---------- */
@@ -484,10 +520,8 @@ export function aggregateByCampaign(
   range: DateRange,
   bu: BusinessUnit,
 ): AggregatedCampaign[] {
-  const ads = aggregateByAd(meta, st, range);
-  const adToBu = new Map<string, string>();
-  for (const a of ads) adToBu.set(a.adName, a.businessUnit);
-
+  // (Used to call aggregateByAd here just to build an unused map. Removed
+  //  to halve this function's cost.)
   const byCamp = new Map<string, AggregatedCampaign>();
   for (const r of meta) {
     if (!inRange(r.date, range)) continue;
@@ -746,6 +780,135 @@ export function computeOverviewKpis(
   };
 }
 
+/* ------------------------------- Anomalies ---------------------------------
+ * Lightweight rule-based detector run on the trailing 30-day daily series.
+ * For each metric we compute the trailing 28-day mean (excluding the last 2
+ * days, which still shift) and flag the most recent day if it deviates by
+ * more than 30%. The biggest mover is shown in a banner on the Overview.
+ * --------------------------------------------------------------------------*/
+
+export interface Anomaly {
+  metric: string;
+  label: string;
+  /** Direction: "up" if current is higher than baseline, "down" if lower. */
+  direction: "up" | "down";
+  /** True when the direction is bad for the business. */
+  bad: boolean;
+  current: number;
+  baseline: number;
+  /** Relative change vs baseline: (current - baseline) / baseline. */
+  change: number;
+  /** Pre-formatted human description. */
+  detail: string;
+}
+
+export function detectAnomalies(rows: DailyKpiPoint[]): Anomaly[] {
+  if (rows.length < 8) return [];
+  const recent = rows[rows.length - 2]; // exclude today (often 0/partial) and use yesterday
+  if (!recent) return [];
+  const baselineRows = rows.slice(0, -2); // exclude today + yesterday
+  if (baselineRows.length < 4) return [];
+
+  function avg(getter: (r: DailyKpiPoint) => number, denom?: (r: DailyKpiPoint) => number): number {
+    if (denom) {
+      let n = 0;
+      let d = 0;
+      for (const r of baselineRows) {
+        n += getter(r);
+        d += denom(r);
+      }
+      return d > 0 ? n / d : 0;
+    }
+    let total = 0;
+    for (const r of baselineRows) total += getter(r);
+    return total / baselineRows.length;
+  }
+
+  function curRatio(n: number, d: number): number {
+    return d > 0 ? n / d : 0;
+  }
+
+  type Spec = {
+    metric: string;
+    label: string;
+    badOnUp: boolean;
+    current: number;
+    baseline: number;
+  };
+  const specs: Spec[] = [
+    {
+      metric: "spend",
+      label: "Spend",
+      badOnUp: true,
+      current: recent.spend,
+      baseline: avg((r) => r.spend),
+    },
+    {
+      metric: "leads",
+      label: "Leads",
+      badOnUp: false,
+      current: recent.leads,
+      baseline: avg((r) => r.leads),
+    },
+    {
+      metric: "bookedJobs",
+      label: "Booked Jobs",
+      badOnUp: false,
+      current: recent.bookedJobs,
+      baseline: avg((r) => r.bookedJobs),
+    },
+    {
+      metric: "ctr",
+      label: "CTR",
+      badOnUp: false,
+      current: curRatio(recent.linkClicks, recent.impressions),
+      baseline: avg((r) => r.linkClicks, (r) => r.impressions),
+    },
+    {
+      metric: "leadRate",
+      label: "Lead Rate",
+      badOnUp: false,
+      current: curRatio(recent.leads, recent.linkClicks),
+      baseline: avg((r) => r.leads, (r) => r.linkClicks),
+    },
+    {
+      metric: "bookRate",
+      label: "Book Rate",
+      badOnUp: false,
+      current: curRatio(recent.bookedJobs, recent.leads),
+      baseline: avg((r) => r.bookedJobs, (r) => r.leads),
+    },
+    {
+      metric: "cancellationRate",
+      label: "Cancellation Rate",
+      badOnUp: true,
+      current: curRatio(recent.cancelledJobs, recent.bookedJobs),
+      baseline: avg((r) => r.cancelledJobs, (r) => r.bookedJobs),
+    },
+  ];
+  const THRESHOLD = 0.3; // 30% relative change
+  const out: Anomaly[] = [];
+  for (const s of specs) {
+    if (s.baseline <= 0) continue;
+    const change = (s.current - s.baseline) / s.baseline;
+    if (Math.abs(change) < THRESHOLD) continue;
+    const direction: "up" | "down" = change >= 0 ? "up" : "down";
+    const bad = direction === "up" ? s.badOnUp : !s.badOnUp;
+    out.push({
+      metric: s.metric,
+      label: s.label,
+      direction,
+      bad,
+      current: s.current,
+      baseline: s.baseline,
+      change,
+      detail: `${s.label} ${direction === "up" ? "up" : "down"} ${Math.abs(change * 100).toFixed(0)}% vs trailing 28-day baseline.`,
+    });
+  }
+  // Sort by absolute change descending so the biggest mover surfaces first.
+  return out.sort((a, b) => Math.abs(b.change) - Math.abs(a.change));
+}
+
 /* --------- Phase B: per-adset, per-business-unit, pipeline metrics ---------- */
 
 export interface AggregatedAdset {
@@ -800,8 +963,16 @@ export function aggregateByAdset(
   }
   // Attribute booked / sales via the ad-level aggregate (which already
   // matches via ad_name → UM Content) and roll up to its adset.
+  const buMatchAd = (adBu: string): boolean => {
+    if (!bu || bu === "All") return true;
+    if (Array.isArray(bu)) {
+      if (bu.length === 0) return true;
+      return bu.some((b) => b.toLowerCase() === adBu.toLowerCase());
+    }
+    return adBu.toLowerCase() === bu.toLowerCase();
+  };
   for (const a of ads) {
-    if (bu !== "All" && a.businessUnit.toLowerCase() !== bu.toLowerCase()) continue;
+    if (!buMatchAd(a.businessUnit)) continue;
     const adset = adNameToAdset.get(a.adName);
     if (!adset) continue;
     const agg = byAdset.get(adset);
@@ -842,9 +1013,17 @@ export function aggregateByBusinessUnit(
   }
   // Sum leads per ad's BU (use ad-level BU which forces "Sewer" for retargeting).
   let totalLeads = 0;
+  const buMatchAd = (adBu: string): boolean => {
+    if (!bu || bu === "All") return true;
+    if (Array.isArray(bu)) {
+      if (bu.length === 0) return true;
+      return bu.some((b) => b.toLowerCase() === adBu.toLowerCase());
+    }
+    return adBu.toLowerCase() === bu.toLowerCase();
+  };
   for (const a of ads) {
     if (!a.businessUnit) continue;
-    if (bu !== "All" && a.businessUnit.toLowerCase() !== bu.toLowerCase()) continue;
+    if (!buMatchAd(a.businessUnit)) continue;
     let agg = byBu.get(a.businessUnit);
     if (!agg) {
       agg = { businessUnit: a.businessUnit, spend: 0, leads: 0, bookedJobs: 0, sales: 0 };
@@ -1013,6 +1192,128 @@ export function showRateSeries(
     return {
       bucket: k,
       rate: c.total > 0 ? (c.completed / c.total) * 100 : null,
+    };
+  });
+}
+
+/* ------------------------- History page: month buckets ------------------------- */
+
+export interface MonthlyKpiRow {
+  /** "YYYY-MM" key. */
+  month: string;
+  spend: number;
+  leads: number;
+  bookedJobs: number;
+  soldJobs: number;
+  sales: number;
+  spendOnRevenue: number; // 0-1, 0 when no revenue
+  ctr: number; // 0-1
+  leadRate: number; // 0-1
+  bookRate: number; // 0-1
+  showRate: number; // 0-1
+  closeRate: number; // 0-1
+  cancellationRate: number; // 0-1
+}
+
+/**
+ * Bucket every meta + ServiceTitan row by calendar month (YYYY-MM) and
+ * compute the same 12 Overview KPIs per bucket. `monthsBack` is inclusive
+ * of the current month.
+ */
+export function monthlyKpiSeries(
+  meta: MetaInsightRow[],
+  st: ServiceTitanRow[],
+  bu: BusinessUnit,
+  monthsBack: number,
+): MonthlyKpiRow[] {
+  const today = (() => {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Chicago",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(new Date());
+    const y = Number(parts.find((p) => p.type === "year")?.value);
+    const m = Number(parts.find((p) => p.type === "month")?.value);
+    return { y, m };
+  })();
+
+  const months: string[] = [];
+  for (let i = monthsBack - 1; i >= 0; i--) {
+    let yr = today.y;
+    let mo = today.m - i;
+    while (mo <= 0) {
+      mo += 12;
+      yr -= 1;
+    }
+    months.push(`${yr}-${String(mo).padStart(2, "0")}`);
+  }
+
+  type Bucket = {
+    spend: number;
+    impressions: number;
+    linkClicks: number;
+    leads: number;
+    bookedJobs: number;
+    soldJobs: number;
+    completedJobs: number;
+    cancelledJobs: number;
+    sales: number;
+  };
+  const buckets = new Map<string, Bucket>();
+  for (const m of months) {
+    buckets.set(m, {
+      spend: 0,
+      impressions: 0,
+      linkClicks: 0,
+      leads: 0,
+      bookedJobs: 0,
+      soldJobs: 0,
+      completedJobs: 0,
+      cancelledJobs: 0,
+      sales: 0,
+    });
+  }
+
+  for (const r of meta) {
+    const ms = r.date?.slice(0, 7);
+    const b = ms && buckets.get(ms);
+    if (!b) continue;
+    b.spend += Number(r.spend) || 0;
+    b.impressions += Number(r.impressions) || 0;
+    b.linkClicks += Number(r.link_clicks) || 0;
+    b.leads += Number(r.results) || 0;
+  }
+  for (const r of st) {
+    if (!buMatches(r, bu)) continue;
+    const ms = String(r["Creation Date"] ?? "").slice(0, 7);
+    const b = buckets.get(ms);
+    if (!b) continue;
+    b.bookedJobs += 1;
+    const sale = Number(r["Sales"]) || 0;
+    b.sales += sale;
+    if (sale > 0) b.soldJobs += 1;
+    const status = String(r["Job Status"] ?? "").toLowerCase();
+    if (status.includes("complet")) b.completedJobs += 1;
+    if (isCancelled(r["Job Status"])) b.cancelledJobs += 1;
+  }
+  const safe = (n: number, d: number) => (d > 0 ? n / d : 0);
+  return months.map((m) => {
+    const b = buckets.get(m)!;
+    return {
+      month: m,
+      spend: b.spend,
+      leads: b.leads,
+      bookedJobs: b.bookedJobs,
+      soldJobs: b.soldJobs,
+      sales: b.sales,
+      spendOnRevenue: safe(b.spend, b.sales),
+      ctr: safe(b.linkClicks, b.impressions),
+      leadRate: safe(b.leads, b.linkClicks),
+      bookRate: safe(b.bookedJobs, b.leads),
+      showRate: safe(b.completedJobs, b.bookedJobs),
+      closeRate: safe(b.soldJobs, b.bookedJobs),
+      cancellationRate: safe(b.cancelledJobs, b.bookedJobs),
     };
   });
 }

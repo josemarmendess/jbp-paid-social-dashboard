@@ -11,6 +11,7 @@ import {
   Map,
   Image as ImageIcon,
   FileText,
+  History as HistoryIcon,
   Settings as SettingsIcon,
 } from "lucide-react";
 import { useState } from "react";
@@ -26,6 +27,7 @@ const NAV: NavItem[] = [
   { href: "/performance", label: "Performance", Icon: BarChart3 },
   { href: "/funnel", label: "Funnel", Icon: Filter },
   { href: "/pipeline", label: "Pipeline", Icon: TrendingUp },
+  { href: "/history", label: "History", Icon: HistoryIcon },
   { href: "/geography", label: "Geography", Icon: Map },
   { href: "/creatives", label: "Creatives", Icon: ImageIcon },
   { href: "/reports", label: "Reports", Icon: FileText },

@@ -11,6 +11,7 @@ import {
   listBusinessUnits,
 } from "@/lib/aggregate";
 import { rollingDaysList } from "@/lib/periods";
+import { parseBuList } from "@/lib/buFilter";
 import type { PaidSocialPayload } from "@/lib/types";
 
 export const revalidate = 1800;
@@ -22,12 +23,6 @@ interface PageProps {
     end?: string;
     bu?: string;
   }>;
-}
-
-function normalizeBu(raw: string | undefined, options: string[]): string {
-  if (!raw || raw === "All") return "All";
-  const match = options.find((o) => o.toLowerCase() === raw.toLowerCase());
-  return match ?? "All";
 }
 
 const chicagoFormatter = new Intl.DateTimeFormat("en-US", {
@@ -70,7 +65,7 @@ export default async function FunnelPage({ searchParams }: PageProps) {
   }
 
   const businessUnits = listBusinessUnits(data.servicetitan_social_leads);
-  const bu = normalizeBu(rawBu, businessUnits);
+  const bu = parseBuList(rawBu, businessUnits);
 
   const current = computeFunnel(
     data.meta_insights,
@@ -125,12 +120,7 @@ export default async function FunnelPage({ searchParams }: PageProps) {
             Five-stage progression from impression to sold job. Compare against {period.previousLabel.replace("vs. ", "")}.
           </p>
           <div className="mt-4">
-            <BigFunnelChart
-              current={current}
-              previous={previous}
-              currentLabel={period.label}
-              previousLabel={period.previousLabel.replace("vs. ", "Previous: ")}
-            />
+            <BigFunnelChart current={current} previous={previous} />
           </div>
         </section>
 

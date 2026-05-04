@@ -1,6 +1,7 @@
 import { BusinessUnitFilter } from "@/components/BusinessUnitFilter";
 import { DateRangePicker } from "@/components/DateRangePicker";
 import { RefreshButton } from "@/components/RefreshButton";
+import { buListLabel } from "@/lib/buFilter";
 import type { DateRangePreset } from "@/lib/types";
 
 interface TopHeaderProps {
@@ -11,7 +12,8 @@ interface TopHeaderProps {
   customStart?: string;
   customEnd?: string;
   businessUnits: string[];
-  bu: string;
+  /** Selected services. Empty array = "All services". */
+  bu: string[];
   /** Optional breadcrumb that sits above the title. */
   breadcrumb?: string;
 }
@@ -31,7 +33,7 @@ export function TopHeader({
   bu,
   breadcrumb,
 }: TopHeaderProps) {
-  const filterActive = bu && bu !== "All";
+  const filterActive = bu.length > 0;
 
   return (
     <header
@@ -52,7 +54,7 @@ export function TopHeader({
           </h1>
           {filterActive ? (
             <span className="inline-flex items-center rounded-full border border-[color:var(--color-jbp-blue)]/30 bg-[color:var(--color-jbp-blue)]/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--color-jbp-blue)]">
-              {bu}
+              {buListLabel(bu)}
             </span>
           ) : null}
         </div>

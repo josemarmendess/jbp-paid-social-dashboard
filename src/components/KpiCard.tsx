@@ -1,5 +1,6 @@
 import { ArrowDownRight, ArrowUpRight, Minus } from "lucide-react";
 import { Sparkline } from "@/components/Sparkline";
+import { MetricLabel } from "@/components/Tooltip";
 import { cn } from "@/lib/utils";
 import { formatDelta, pctChange } from "@/lib/format";
 
@@ -14,6 +15,10 @@ export interface KpiCardProps {
   sparkline?: number[];
   /** Optional muted line under the delta. */
   hint?: string;
+  /** Definition shown on hover of the Info icon. */
+  tooltip?: React.ReactNode;
+  /** Optional goal status (e.g., "+15% over target"). Renders as a small chip. */
+  goalChip?: { tone: "positive" | "negative" | "neutral"; text: string };
 }
 
 export function KpiCard({
@@ -24,6 +29,8 @@ export function KpiCard({
   invertDelta = false,
   sparkline,
   hint,
+  tooltip,
+  goalChip,
 }: KpiCardProps) {
   const delta = pctChange(current, previous);
   const isFlat = !Number.isFinite(delta) || delta === 0;
@@ -46,17 +53,28 @@ export function KpiCard({
         "hover:-translate-y-[1px] hover:shadow-[0_4px_16px_rgba(26,15,11,0.06)]",
       )}
     >
-      <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[color:var(--color-text-secondary)]">
-        {label}
-      </span>
+      <div className="flex items-start justify-between gap-2">
+        {tooltip ? (
+          <MetricLabel
+            label={label}
+            tooltip={tooltip}
+            className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[color:var(--color-text-secondary)]"
+          />
+        ) : (
+          <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[color:var(--color-text-secondary)]">
+            {label}
+          </span>
+        )}
+        {goalChip ? <GoalChip tone={goalChip.tone} text={goalChip.text} /> : null}
+      </div>
       <span
         className="font-mono font-semibold tabular-nums text-[color:var(--color-text-primary)]"
-        style={{ fontSize: "28px", lineHeight: 1.1, letterSpacing: "-0.01em" }}
+        style={{ fontSize: "30px", lineHeight: 1.1, letterSpacing: "-0.01em" }}
       >
         {value}
       </span>
-      <div className={cn("flex items-center gap-1 text-[11px] tabular-nums", tone)}>
-        <Icon className="h-3 w-3" strokeWidth={2} aria-hidden="true" />
+      <div className={cn("flex items-center gap-1 text-[12px] tabular-nums", tone)}>
+        <Icon className="h-3.5 w-3.5" strokeWidth={2} aria-hidden="true" />
         <span className="font-medium">
           {isInfinite && current > 0 && previous === 0
             ? "new"
@@ -72,10 +90,35 @@ export function KpiCard({
         </div>
       ) : null}
       {hint ? (
-        <span className="text-[10px] text-[color:var(--color-text-tertiary)] tabular-nums">
+        <span className="text-[11px] text-[color:var(--color-text-tertiary)] tabular-nums">
           {hint}
         </span>
       ) : null}
     </div>
+  );
+}
+
+function GoalChip({
+  tone,
+  text,
+}: {
+  tone: "positive" | "negative" | "neutral";
+  text: string;
+}) {
+  const styles =
+    tone === "positive"
+      ? "bg-[color:var(--color-positive-soft)] text-[color:var(--color-positive)]"
+      : tone === "negative"
+        ? "bg-[color:var(--color-negative-soft)] text-[color:var(--color-negative)]"
+        : "bg-[color:var(--color-surface-hover)] text-[color:var(--color-text-secondary)]";
+  return (
+    <span
+      className={cn(
+        "inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[10px] font-semibold tabular-nums",
+        styles,
+      )}
+    >
+      {text}
+    </span>
   );
 }

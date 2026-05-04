@@ -12,6 +12,7 @@ import {
   listBusinessUnits,
 } from "@/lib/aggregate";
 import { rollingDaysList } from "@/lib/periods";
+import { parseBuList } from "@/lib/buFilter";
 import type {
   MetaAdCreativeRow,
   PaidSocialPayload,
@@ -26,12 +27,6 @@ interface PageProps {
     end?: string;
     bu?: string;
   }>;
-}
-
-function normalizeBu(raw: string | undefined, options: string[]): string {
-  if (!raw || raw === "All") return "All";
-  const match = options.find((o) => o.toLowerCase() === raw.toLowerCase());
-  return match ?? "All";
 }
 
 const chicagoFormatter = new Intl.DateTimeFormat("en-US", {
@@ -76,7 +71,7 @@ export default async function PerformancePage({ searchParams }: PageProps) {
   }
 
   const businessUnits = listBusinessUnits(data.servicetitan_social_leads);
-  const bu = normalizeBu(rawBu, businessUnits);
+  const bu = parseBuList(rawBu, businessUnits);
   const lastUpdated = formatLastUpdated(data.generated_at);
 
   const allAds = aggregateByAd(
@@ -85,9 +80,11 @@ export default async function PerformancePage({ searchParams }: PageProps) {
     period.current,
   );
   const ads =
-    bu === "All"
+    bu.length === 0
       ? allAds
-      : allAds.filter((a) => a.businessUnit.toLowerCase() === bu.toLowerCase());
+      : allAds.filter((a) =>
+          bu.some((b) => b.toLowerCase() === a.businessUnit.toLowerCase()),
+        );
 
   const campaigns = aggregateByCampaign(
     data.meta_insights,

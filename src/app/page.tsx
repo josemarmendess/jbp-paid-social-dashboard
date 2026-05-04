@@ -4,6 +4,7 @@ import { PivotTable } from "@/components/PivotTable";
 import { DailyTrendChart } from "@/components/DailyTrendChart";
 import { FunnelChart } from "@/components/FunnelChart";
 import { CancellationRateChart } from "@/components/CancellationRateChart";
+import { AnomalyBanner } from "@/components/AnomalyBanner";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { fetchPaidSocialData } from "@/lib/fetchData";
 import { getPeriod, parsePreset } from "@/lib/dateRange";
@@ -14,6 +15,7 @@ import {
   computePivotMetrics,
   dailyKpiSeries,
   dailySpendVsRevenue,
+  detectAnomalies,
   listBusinessUnits,
 } from "@/lib/aggregate";
 import {
@@ -21,11 +23,17 @@ import {
   getRollingRange,
   rollingDaysList,
 } from "@/lib/periods";
+import { parseBuList, buListLabel } from "@/lib/buFilter";
 import {
   formatCurrency,
   formatInt,
   formatPercent,
 } from "@/lib/format";
+import { METRIC_DEFS } from "@/lib/metricDefinitions";
+import {
+  parseGoalTargets,
+  goalChip,
+} from "@/lib/goals";
 import type { PaidSocialPayload } from "@/lib/types";
 
 export const revalidate = 1800;
@@ -36,13 +44,10 @@ interface PageProps {
     start?: string;
     end?: string;
     bu?: string;
+    cplTarget?: string;
+    roasTarget?: string;
+    cancelTarget?: string;
   }>;
-}
-
-function normalizeBu(raw: string | undefined, options: string[]): string {
-  if (!raw || raw === "All") return "All";
-  const match = options.find((o) => o.toLowerCase() === raw.toLowerCase());
-  return match ?? "All";
 }
 
 const chicagoFormatter = new Intl.DateTimeFormat("en-US", {
@@ -63,9 +68,10 @@ function formatLastUpdated(generatedAt: string): string {
 }
 
 export default async function Page({ searchParams }: PageProps) {
-  const { range, start, end, bu: rawBu } = await searchParams;
-  const preset = parsePreset(range);
-  const period = getPeriod(preset, start, end);
+  const sp = await searchParams;
+  const preset = parsePreset(sp.range);
+  const period = getPeriod(preset, sp.start, sp.end);
+  const targets = parseGoalTargets(sp);
 
   let data: PaidSocialPayload | null = null;
   let fetchError: string | null = null;
@@ -87,7 +93,7 @@ export default async function Page({ searchParams }: PageProps) {
   }
 
   const businessUnits = listBusinessUnits(data.servicetitan_social_leads);
-  const bu = normalizeBu(rawBu, businessUnits);
+  const bu = parseBuList(sp.bu, businessUnits);
   const lastUpdated = formatLastUpdated(data.generated_at);
 
   const current = computeOverviewKpis(
@@ -103,7 +109,7 @@ export default async function Page({ searchParams }: PageProps) {
     bu,
   );
 
-  // 30-day rolling daily series for sparklines.
+  // 30-day rolling daily series for sparklines + anomaly detection.
   const sparkDates = rollingDaysList(30);
   const sparkRows = dailyKpiSeries(
     data.meta_insights,
@@ -129,15 +135,49 @@ export default async function Page({ searchParams }: PageProps) {
     ),
   };
 
+  const anomalies = detectAnomalies(sparkRows);
+
+  // Pivot stacks: when >=1 BU is selected, render one pivot per BU + a Total
+  // pivot. When empty, just the single "All services" pivot.
   const pivotPeriods = getPivotPeriods();
-  const pivotValues = pivotPeriods.map((p) =>
-    computePivotMetrics(
-      data!.meta_insights,
-      data!.servicetitan_social_leads,
-      p.range,
-      bu,
-    ),
-  );
+  const pivotSections: { caption?: string; values: ReturnType<typeof computePivotMetrics>[] }[] = [];
+  if (bu.length === 0) {
+    pivotSections.push({
+      values: pivotPeriods.map((p) =>
+        computePivotMetrics(
+          data!.meta_insights,
+          data!.servicetitan_social_leads,
+          p.range,
+          [],
+        ),
+      ),
+    });
+  } else {
+    for (const b of bu) {
+      pivotSections.push({
+        caption: b,
+        values: pivotPeriods.map((p) =>
+          computePivotMetrics(
+            data!.meta_insights,
+            data!.servicetitan_social_leads,
+            p.range,
+            [b],
+          ),
+        ),
+      });
+    }
+    pivotSections.push({
+      caption: "Total · " + buListLabel(bu),
+      values: pivotPeriods.map((p) =>
+        computePivotMetrics(
+          data!.meta_insights,
+          data!.servicetitan_social_leads,
+          p.range,
+          bu,
+        ),
+      ),
+    });
+  }
 
   const trendDates = rollingDaysList(30);
   const trend = dailySpendVsRevenue(
@@ -154,27 +194,26 @@ export default async function Page({ searchParams }: PageProps) {
     bu,
   );
 
+  // Pass long enough windows for the largest preset (26 weeks · 24 months)
+  // plus another N to cover the "previous" comparison half.
   const weeklyAll = cancellationRateSeries(
     data.servicetitan_social_leads,
     bu,
     "week",
-    16,
+    52,
   );
   const monthlyAll = cancellationRateSeries(
     data.servicetitan_social_leads,
     bu,
     "month",
-    12,
+    48,
   );
-  const splitWeekly = {
-    previous: weeklyAll.slice(0, Math.max(0, weeklyAll.length - 8)),
-    current: weeklyAll.slice(-8),
-  };
-  const splitMonthly = {
-    previous: monthlyAll.slice(0, Math.max(0, monthlyAll.length - 6)),
-    current: monthlyAll.slice(-6),
-  };
   const last30Range = getRollingRange(30);
+
+  // Goal chips
+  const cplCurrent = current.leads > 0 ? current.spend / current.leads : null;
+  const roasCurrent =
+    current.spend > 0 ? current.sales / current.spend : null;
 
   return (
     <main className="flex flex-1 flex-col">
@@ -192,10 +231,10 @@ export default async function Page({ searchParams }: PageProps) {
       <div className="mx-auto flex w-full max-w-[1320px] flex-1 flex-col gap-8 px-6 py-6 sm:px-8">
         <div className="flex items-baseline justify-between">
           <div className="flex flex-col">
-            <span className="text-[11px] uppercase tracking-[0.08em] text-[color:var(--color-text-tertiary)]">
+            <span className="text-[12px] uppercase tracking-[0.08em] text-[color:var(--color-text-tertiary)]">
               {period.label} · {period.current.startStr} → {period.current.endStr}
             </span>
-            <span className="text-[12px] text-[color:var(--color-text-secondary)]">
+            <span className="text-[13px] text-[color:var(--color-text-secondary)]">
               {period.previousLabel}
             </span>
           </div>
@@ -204,10 +243,12 @@ export default async function Page({ searchParams }: PageProps) {
           </span>
         </div>
 
+        {anomalies.length > 0 ? <AnomalyBanner anomalies={anomalies} /> : null}
+
         {/* KPI grid: 12 cards (volume row + rate row) */}
         <section
           aria-label="Key performance indicators"
-          className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-6"
+          className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-6"
         >
           <KpiCard
             label="Spend"
@@ -216,6 +257,7 @@ export default async function Page({ searchParams }: PageProps) {
             previous={previous.spend}
             invertDelta
             sparkline={sparks.spend}
+            tooltip={METRIC_DEFS.spend}
           />
           <KpiCard
             label="Leads"
@@ -223,6 +265,7 @@ export default async function Page({ searchParams }: PageProps) {
             current={current.leads}
             previous={previous.leads}
             sparkline={sparks.leads}
+            tooltip={METRIC_DEFS.leads}
           />
           <KpiCard
             label="Booked Jobs"
@@ -230,6 +273,7 @@ export default async function Page({ searchParams }: PageProps) {
             current={current.bookedJobs}
             previous={previous.bookedJobs}
             sparkline={sparks.booked}
+            tooltip={METRIC_DEFS.bookedJobs}
           />
           <KpiCard
             label="Sold Jobs"
@@ -237,6 +281,7 @@ export default async function Page({ searchParams }: PageProps) {
             current={current.soldJobs}
             previous={previous.soldJobs}
             sparkline={sparks.sold}
+            tooltip={METRIC_DEFS.soldJobs}
           />
           <KpiCard
             label="Sales Revenue"
@@ -244,6 +289,7 @@ export default async function Page({ searchParams }: PageProps) {
             current={current.sales}
             previous={previous.sales}
             sparkline={sparks.sales}
+            tooltip={METRIC_DEFS.salesRevenue}
           />
           <KpiCard
             label="Spend on Revenue"
@@ -253,6 +299,7 @@ export default async function Page({ searchParams }: PageProps) {
             invertDelta
             sparkline={sparks.spendOnRevenue}
             hint="Lower is better"
+            tooltip={METRIC_DEFS.spendOnRevenue}
           />
 
           <KpiCard
@@ -261,6 +308,7 @@ export default async function Page({ searchParams }: PageProps) {
             current={current.ctr}
             previous={previous.ctr}
             sparkline={sparks.ctr}
+            tooltip={METRIC_DEFS.ctr}
           />
           <KpiCard
             label="Lead Rate"
@@ -269,6 +317,7 @@ export default async function Page({ searchParams }: PageProps) {
             previous={previous.leadRate}
             sparkline={sparks.leadRate}
             hint="leads / clicks"
+            tooltip={METRIC_DEFS.leadRate}
           />
           <KpiCard
             label="Book Rate"
@@ -277,6 +326,12 @@ export default async function Page({ searchParams }: PageProps) {
             previous={previous.bookRate}
             sparkline={sparks.bookRate}
             hint="booked / leads"
+            tooltip={METRIC_DEFS.bookRate}
+            goalChip={
+              targets.cplTarget != null && cplCurrent != null
+                ? undefined
+                : undefined
+            }
           />
           <KpiCard
             label="Show Rate"
@@ -285,6 +340,7 @@ export default async function Page({ searchParams }: PageProps) {
             previous={previous.showRate}
             sparkline={sparks.showRate}
             hint="completed / booked"
+            tooltip={METRIC_DEFS.showRate}
           />
           <KpiCard
             label="Close Rate"
@@ -293,6 +349,7 @@ export default async function Page({ searchParams }: PageProps) {
             previous={previous.closeRate}
             sparkline={sparks.closeRate}
             hint="sold / booked"
+            tooltip={METRIC_DEFS.closeRate}
           />
           <KpiCard
             label="Cancellation Rate"
@@ -302,16 +359,49 @@ export default async function Page({ searchParams }: PageProps) {
             invertDelta
             sparkline={sparks.cancellationRate}
             hint="of all bookings"
+            tooltip={METRIC_DEFS.cancellationRate}
+            goalChip={goalChip(
+              "cancelRate",
+              current.cancellationRate * 100,
+              targets.cancelTarget,
+            )}
           />
         </section>
 
-        {/* Pivot table */}
+        {/* Pivot tables — stacked when multi-service is selected. */}
         <section
           aria-label="Performance over time"
           className="flex flex-col gap-3"
         >
-          <SectionHeader title="Performance Over Time" subtitle="All times America/Chicago" />
-          <PivotTable periods={pivotPeriods} values={pivotValues} />
+          <SectionHeader
+            title="Performance Over Time"
+            subtitle={
+              bu.length > 1
+                ? `${bu.length} services · plus total combined`
+                : "All times America/Chicago"
+            }
+          />
+          <div className="flex flex-col gap-4">
+            {pivotSections.map((sec, i) => (
+              <PivotTable
+                key={sec.caption ?? `pivot-${i}`}
+                periods={pivotPeriods}
+                values={sec.values}
+                caption={sec.caption}
+              />
+            ))}
+          </div>
+          <p className="text-[11px] text-[color:var(--color-text-tertiary)]">
+            Hover any metric label for its definition. CPL goal:{" "}
+            {targets.cplTarget != null ? `$${targets.cplTarget}` : "not set"} · ROAS goal:{" "}
+            {targets.roasTarget != null ? `${targets.roasTarget}x` : "not set"} ·
+            {" "}Cancel goal:{" "}
+            {targets.cancelTarget != null ? `<${targets.cancelTarget}%` : "not set"} ·{" "}
+            <span className="text-[color:var(--color-text-secondary)]">
+              set via URL: ?cplTarget=80&roasTarget=4&cancelTarget=15
+            </span>
+            {cplCurrent != null && roasCurrent != null ? null : null}
+          </p>
         </section>
 
         {/* Trends row */}
@@ -331,10 +421,7 @@ export default async function Page({ searchParams }: PageProps) {
               <FunnelChart metrics={funnel} />
             </ChartCard>
             <ChartCard title="Cancellation Rate" caption="Current vs previous">
-              <CancellationRateChart
-                weekly={splitWeekly}
-                monthly={splitMonthly}
-              />
+              <CancellationRateChart weekly={weeklyAll} monthly={monthlyAll} />
             </ChartCard>
           </div>
         </section>
@@ -354,12 +441,12 @@ function SectionHeader({
     <div className="flex items-baseline justify-between">
       <h2
         className="font-display text-[color:var(--color-text-primary)]"
-        style={{ fontSize: 16, letterSpacing: "0.06em" }}
+        style={{ fontSize: 18, letterSpacing: "0.06em" }}
       >
         {title}
       </h2>
       {subtitle ? (
-        <span className="text-[11px] text-[color:var(--color-text-tertiary)] tabular-nums">
+        <span className="text-[12px] text-[color:var(--color-text-tertiary)] tabular-nums">
           {subtitle}
         </span>
       ) : null}
@@ -379,7 +466,7 @@ function ChartCard({
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-[color:var(--color-border-subtle)] bg-white p-4">
       <div className="flex items-baseline justify-between">
-        <h3 className="text-[13px] font-semibold text-[color:var(--color-text-primary)]">
+        <h3 className="text-[14px] font-semibold text-[color:var(--color-text-primary)]">
           {title}
         </h3>
         {caption ? (
