@@ -9,7 +9,7 @@ const Inner = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="h-[520px] animate-pulse rounded-xl border border-border/60 bg-card" />
+      <div className="h-[520px] animate-pulse rounded-lg border border-[color:var(--color-border-subtle)] bg-white" />
     ),
   },
 );
