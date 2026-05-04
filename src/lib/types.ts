@@ -36,11 +36,30 @@ export interface ServiceTitanRow {
   [key: string]: unknown;
 }
 
+/**
+ * Phase B addition (optional, may not be in payload yet). Joined to ads
+ * by ad_name for thumbnails / modal previews. When absent, the dashboard
+ * falls back to a cream gradient + mascot tile.
+ */
+export interface MetaAdCreativeRow {
+  ad_name?: string;
+  ad_id?: string | number;
+  thumbnail_url?: string;
+  image_url?: string;
+  video_id?: string;
+  body?: string;
+  title?: string;
+  status?: string;
+  permalink_url?: string;
+  [key: string]: unknown;
+}
+
 export interface PaidSocialPayload {
   generated_at: string;
   meta_account_id: number | string;
   meta_insights: MetaInsightRow[];
   servicetitan_social_leads: ServiceTitanRow[];
+  meta_ad_creatives?: MetaAdCreativeRow[];
 }
 
 export type DateRangePreset =

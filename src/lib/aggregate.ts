@@ -746,6 +746,305 @@ export function computeOverviewKpis(
   };
 }
 
+/* --------- Phase B: per-adset, per-business-unit, pipeline metrics ---------- */
+
+export interface AggregatedAdset {
+  adsetName: string;
+  campaignName: string;
+  spend: number;
+  impressions: number;
+  linkClicks: number;
+  leads: number;
+  bookedJobs: number;
+  sales: number;
+}
+
+export function aggregateByAdset(
+  meta: MetaInsightRow[],
+  st: ServiceTitanRow[],
+  range: DateRange,
+  bu: BusinessUnit,
+): AggregatedAdset[] {
+  const ads = aggregateByAd(meta, st, range);
+  // Build adName -> adsetName / campaignName map from this period's Meta rows.
+  const adNameToAdset = new Map<string, string>();
+  const adNameToCampaign = new Map<string, string>();
+  const byAdset = new Map<string, AggregatedAdset>();
+  for (const r of meta) {
+    if (!inRange(r.date, range)) continue;
+    const key = r.adset_name || "(unnamed)";
+    if (r.ad_name) {
+      adNameToAdset.set(r.ad_name, key);
+      if (!adNameToCampaign.has(r.ad_name)) {
+        adNameToCampaign.set(r.ad_name, r.campaign_name || "(unnamed)");
+      }
+    }
+    let agg = byAdset.get(key);
+    if (!agg) {
+      agg = {
+        adsetName: key,
+        campaignName: r.campaign_name || "(unnamed)",
+        spend: 0,
+        impressions: 0,
+        linkClicks: 0,
+        leads: 0,
+        bookedJobs: 0,
+        sales: 0,
+      };
+      byAdset.set(key, agg);
+    }
+    agg.spend += Number(r.spend) || 0;
+    agg.impressions += Number(r.impressions) || 0;
+    agg.linkClicks += Number(r.link_clicks) || 0;
+    agg.leads += Number(r.results) || 0;
+  }
+  // Attribute booked / sales via the ad-level aggregate (which already
+  // matches via ad_name → UM Content) and roll up to its adset.
+  for (const a of ads) {
+    if (bu !== "All" && a.businessUnit.toLowerCase() !== bu.toLowerCase()) continue;
+    const adset = adNameToAdset.get(a.adName);
+    if (!adset) continue;
+    const agg = byAdset.get(adset);
+    if (!agg) continue;
+    agg.bookedJobs += a.bookedJobs;
+    agg.sales += a.sales;
+  }
+  return Array.from(byAdset.values())
+    .filter((a) => a.spend > 0 || a.bookedJobs > 0 || a.leads > 0)
+    .sort((a, b) => b.sales - a.sales);
+}
+
+export interface AggregatedBusinessUnit {
+  businessUnit: string;
+  spend: number; // pro-rated by ad-level lead share
+  leads: number;
+  bookedJobs: number;
+  sales: number;
+}
+
+/**
+ * Roll up performance by ServiceTitan Business Unit. Spend (Meta-only) is
+ * distributed proportionally across each ad's BU based on ad-level leads —
+ * matches how the per-zip aggregation pro-rates spend.
+ */
+export function aggregateByBusinessUnit(
+  meta: MetaInsightRow[],
+  st: ServiceTitanRow[],
+  range: DateRange,
+  bu: BusinessUnit,
+): AggregatedBusinessUnit[] {
+  const ads = aggregateByAd(meta, st, range);
+  const byBu = new Map<string, AggregatedBusinessUnit>();
+  let totalSpend = 0;
+  for (const r of meta) {
+    if (!inRange(r.date, range)) continue;
+    totalSpend += Number(r.spend) || 0;
+  }
+  // Sum leads per ad's BU (use ad-level BU which forces "Sewer" for retargeting).
+  let totalLeads = 0;
+  for (const a of ads) {
+    if (!a.businessUnit) continue;
+    if (bu !== "All" && a.businessUnit.toLowerCase() !== bu.toLowerCase()) continue;
+    let agg = byBu.get(a.businessUnit);
+    if (!agg) {
+      agg = { businessUnit: a.businessUnit, spend: 0, leads: 0, bookedJobs: 0, sales: 0 };
+      byBu.set(a.businessUnit, agg);
+    }
+    agg.leads += a.leads;
+    agg.bookedJobs += a.bookedJobs;
+    agg.sales += a.sales;
+    totalLeads += a.leads;
+  }
+  if (totalLeads > 0 && totalSpend > 0) {
+    for (const v of byBu.values()) {
+      v.spend = (v.leads / totalLeads) * totalSpend;
+    }
+  }
+  return Array.from(byBu.values()).sort((a, b) => b.sales - a.sales);
+}
+
+export interface PipelineMetrics {
+  carryover: number;
+  pendingValue: number; // average sale value × pending bookings
+  avgDaysToClose: number | null; // Creation Date → Sold On
+  avgDaysToComplete: number | null; // Sold On → Completed On
+  totalPipelineCount: number; // total pending across whole dataset (not just last month)
+}
+
+function daysBetween(a: string | undefined, b: string | undefined): number | null {
+  if (!a || !b) return null;
+  const ma = /^\d{4}-\d{2}-\d{2}$/.exec(String(a));
+  const mb = /^\d{4}-\d{2}-\d{2}$/.exec(String(b));
+  if (!ma || !mb) return null;
+  const da = Date.parse(`${a}T12:00:00Z`);
+  const db = Date.parse(`${b}T12:00:00Z`);
+  if (!Number.isFinite(da) || !Number.isFinite(db)) return null;
+  return Math.round((db - da) / 86400000);
+}
+
+export function computePipelineMetrics(
+  st: ServiceTitanRow[],
+  bu: BusinessUnit,
+  carryoverRange: DateRange,
+): PipelineMetrics {
+  let carryover = 0;
+  let totalPending = 0;
+  let soldCount = 0;
+  let soldRevenue = 0;
+  let daysToCloseSum = 0;
+  let daysToCloseN = 0;
+  let daysToCompleteSum = 0;
+  let daysToCompleteN = 0;
+
+  for (const r of st) {
+    if (!buMatches(r, bu)) continue;
+    if (isPendingPipeline(r["Job Status"])) {
+      totalPending += 1;
+      if (inRange(r["Creation Date"], carryoverRange)) carryover += 1;
+    }
+    const sale = Number(r["Sales"]) || 0;
+    if (sale > 0) {
+      soldCount += 1;
+      soldRevenue += sale;
+    }
+    const created = String(r["Creation Date"] ?? "");
+    const sold = String(r["Sold On"] ?? "");
+    const completed = String(r["Completed On"] ?? "");
+    const dClose = daysBetween(created, sold);
+    if (dClose !== null && dClose >= 0) {
+      daysToCloseSum += dClose;
+      daysToCloseN += 1;
+    }
+    const dComp = daysBetween(sold, completed);
+    if (dComp !== null && dComp >= 0) {
+      daysToCompleteSum += dComp;
+      daysToCompleteN += 1;
+    }
+  }
+  const avgSaleValue = soldCount > 0 ? soldRevenue / soldCount : 0;
+  return {
+    carryover,
+    pendingValue: avgSaleValue * totalPending,
+    avgDaysToClose: daysToCloseN > 0 ? daysToCloseSum / daysToCloseN : null,
+    avgDaysToComplete: daysToCompleteN > 0 ? daysToCompleteSum / daysToCompleteN : null,
+    totalPipelineCount: totalPending,
+  };
+}
+
+export interface StaleBooking {
+  jobNumber: string | number;
+  creationDate: string;
+  campaignName: string;
+  businessUnit: string;
+  zip: string;
+  daysOpen: number;
+  status: string;
+}
+
+/**
+ * Pending jobs (Scheduled / In Progress / open statuses) created more than
+ * `thresholdDays` ago. Used by the Pipeline page's stale bookings list.
+ */
+export function getStaleBookings(
+  st: ServiceTitanRow[],
+  bu: BusinessUnit,
+  thresholdDays: number,
+  todayStr: string,
+): StaleBooking[] {
+  const out: StaleBooking[] = [];
+  const today = Date.parse(`${todayStr}T12:00:00Z`);
+  for (const r of st) {
+    if (!buMatches(r, bu)) continue;
+    if (!isPendingPipeline(r["Job Status"])) continue;
+    const created = String(r["Creation Date"] ?? "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(created)) continue;
+    const c = Date.parse(`${created}T12:00:00Z`);
+    if (!Number.isFinite(c)) continue;
+    const days = Math.round((today - c) / 86400000);
+    if (days < thresholdDays) continue;
+    out.push({
+      jobNumber: r["Job Number"],
+      creationDate: created,
+      campaignName: String(r["Campaign Name"] ?? ""),
+      businessUnit: String(r["Business Unit"] ?? ""),
+      zip: String(r["Zip Code"] ?? ""),
+      daysOpen: days,
+      status: String(r["Job Status"] ?? ""),
+    });
+  }
+  return out.sort((a, b) => b.daysOpen - a.daysOpen);
+}
+
+/**
+ * Show-rate buckets (completed / booked) — same shape as cancellationRateSeries.
+ * "Show Rate" here is the operations definition: completed jobs / total bookings.
+ */
+export function showRateSeries(
+  st: ServiceTitanRow[],
+  bu: BusinessUnit,
+  granularity: "week" | "month",
+  buckets: number,
+): CancellationPoint[] {
+  const counts = new Map<string, { total: number; completed: number }>();
+  for (const r of st) {
+    if (!buMatches(r, bu)) continue;
+    const dStr = String(r["Creation Date"] ?? "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dStr)) continue;
+    const d = new Date(`${dStr}T12:00:00Z`);
+    if (Number.isNaN(d.getTime())) continue;
+    const key =
+      granularity === "week"
+        ? isoWeekKey(d)
+        : `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+    let c = counts.get(key);
+    if (!c) {
+      c = { total: 0, completed: 0 };
+      counts.set(key, c);
+    }
+    c.total += 1;
+    if (String(r["Job Status"] ?? "").toLowerCase().includes("complet")) {
+      c.completed += 1;
+    }
+  }
+  const sortedKeys = Array.from(counts.keys()).sort();
+  const recent = sortedKeys.slice(-buckets);
+  return recent.map((k) => {
+    const c = counts.get(k)!;
+    return {
+      bucket: k,
+      rate: c.total > 0 ? (c.completed / c.total) * 100 : null,
+    };
+  });
+}
+
+/* ------------------------- Funnel page: rate series ------------------------- */
+
+export interface FunnelRatesPoint {
+  date: string;
+  /** All values in 0-1 (ratio). */
+  ctr: number;
+  leadRate: number;
+  bookRate: number;
+  closeRate: number;
+}
+
+export function dailyFunnelRates(
+  meta: MetaInsightRow[],
+  st: ServiceTitanRow[],
+  dates: string[],
+  bu: BusinessUnit,
+): FunnelRatesPoint[] {
+  const rows = dailyKpiSeries(meta, st, dates, bu);
+  const safe = (n: number, d: number) => (d > 0 ? n / d : 0);
+  return rows.map((r) => ({
+    date: r.date,
+    ctr: safe(r.linkClicks, r.impressions),
+    leadRate: safe(r.leads, r.linkClicks),
+    bookRate: safe(r.bookedJobs, r.leads),
+    closeRate: safe(r.soldJobs, r.bookedJobs),
+  }));
+}
+
 export interface AdSeven {
   adName: string;
   series: number[]; // last 7 days of spend (oldest first)
