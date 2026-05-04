@@ -49,12 +49,22 @@ export interface PeriodColumn {
  * Definitions per the spec — all rolling windows include today (e.g.
  * "Last 30" = today + past 29 days).
  */
+/**
+ * Pivot column ranges. Aligned 1:1 with the KPI date-filter presets in
+ * `dateRange.ts` so each column equals what the user sees in the KPI cards
+ * when that preset is selected:
+ *  - Last Month / Month to Date / Last N Days are CLOSED windows that end
+ *    yesterday (today is excluded — Meta + ServiceTitan numbers still shift
+ *    on the current day, so closed windows stay stable).
+ *  - Yesterday / Today are single-day open windows.
+ */
 export function getPivotPeriods(): PeriodColumn[] {
   const today = chicagoToday();
   const yesterday = subDays(today, 1);
   const lastMonthAnchor = subMonths(today, 1);
   const lastMonthStart = startOfMonth(lastMonthAnchor);
   const lastMonthEnd = endOfMonth(lastMonthAnchor);
+  const mtdEnd = yesterday >= startOfMonth(today) ? yesterday : startOfMonth(today);
   return [
     {
       key: "last_month",
@@ -64,22 +74,26 @@ export function getPivotPeriods(): PeriodColumn[] {
     {
       key: "month_to_date",
       label: "Month to Date",
-      range: { startStr: ymd(startOfMonth(today)), endStr: ymd(today) },
+      // Matches the KPI "this_month" preset: 1st of month → yesterday.
+      range: { startStr: ymd(startOfMonth(today)), endStr: ymd(mtdEnd) },
     },
     {
       key: "last_30",
       label: "Last 30 Days",
-      range: { startStr: ymd(subDays(today, 29)), endStr: ymd(today) },
+      // Matches KPI "last_30": yesterday-29 → yesterday.
+      range: { startStr: ymd(subDays(yesterday, 29)), endStr: ymd(yesterday) },
     },
     {
       key: "last_7",
       label: "Last 7 Days",
-      range: { startStr: ymd(subDays(today, 6)), endStr: ymd(today) },
+      // Matches KPI "last_7": yesterday-6 → yesterday.
+      range: { startStr: ymd(subDays(yesterday, 6)), endStr: ymd(yesterday) },
     },
     {
       key: "last_3",
       label: "Last 3 Days",
-      range: { startStr: ymd(subDays(today, 2)), endStr: ymd(today) },
+      // Closed 3-day window ending yesterday.
+      range: { startStr: ymd(subDays(yesterday, 2)), endStr: ymd(yesterday) },
     },
     {
       key: "yesterday",
