@@ -1,21 +1,23 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Check, Copy, Settings2 } from "lucide-react";
+import { Check, Copy, ImageIcon, Settings2 } from "lucide-react";
 import {
   usePathname,
   useRouter,
   useSearchParams,
 } from "next/navigation";
+import { toPng } from "html-to-image";
 import { MetricLabel } from "@/components/Tooltip";
 import { cn } from "@/lib/utils";
-import { formatCurrency, formatInt } from "@/lib/format";
+import { formatCurrency, formatInt, formatRoas } from "@/lib/format";
 import type { PeriodColumn } from "@/lib/periods";
 import type { PivotMetrics } from "@/lib/aggregate";
 import {
   PIVOT_ROWS,
   type PivotRowKind,
 } from "@/lib/pivotConfig";
+import { SLICE_TONES, type SliceTone } from "@/lib/sliceColors";
 
 function formatCell(value: number | null, kind: PivotRowKind): string {
   if (value === null || !Number.isFinite(value)) return "n/a";
@@ -28,11 +30,14 @@ function formatCell(value: number | null, kind: PivotRowKind): string {
       return formatInt(value);
     case "percent":
       return `${Math.round(value)}%`;
+    case "roas":
+      return formatRoas(value);
+    case "days":
+      return `${value.toFixed(1)}d`;
   }
 }
 
-/** Plain-text version used by the Copy button — no "$" / "," for currency
- *  so the recipient can paste as raw numbers if they want. */
+/** Plain-text version used by the Copy → TSV fallback. */
 function rawCell(value: number | null, kind: PivotRowKind): string {
   if (value === null || !Number.isFinite(value)) return "n/a";
   switch (kind) {
@@ -44,40 +49,44 @@ function rawCell(value: number | null, kind: PivotRowKind): string {
       return Math.round(value).toString();
     case "percent":
       return `${Math.round(value)}%`;
+    case "roas":
+      return `${value.toFixed(2)}x`;
+    case "days":
+      return `${value.toFixed(1)}d`;
   }
 }
+
+/* --------------------------------- Pivot --------------------------------- */
 
 interface PivotTableProps {
   periods: PeriodColumn[];
   values: PivotMetrics[];
-  /** Optional title shown above the table (e.g., service name in stacked view). */
   caption?: string;
-  /** Visible row keys — defaults to all. */
+  /** Slice color hint — drives the caption bar tint and the left rail. */
+  tone?: SliceTone;
   visibleRowKeys: string[];
-  /** Visible column keys — defaults to every period. */
   visibleColKeys: string[];
 }
 
-/**
- * Performance Over Time pivot. Rows + columns are individually toggleable,
- * and a Copy button serializes the current view as TSV (great for pasting
- * into Slack, Google Sheets, or Numbers).
- */
+type CopyState = "idle" | "copying" | "image-ok" | "tsv-fallback" | "error";
+
 export function PivotTable({
   periods,
   values,
   caption,
+  tone = "neutral",
   visibleRowKeys,
   visibleColKeys,
 }: PivotTableProps) {
-  const [copied, setCopied] = useState(false);
+  const tableRef = useRef<HTMLDivElement>(null);
+  const [copy, setCopy] = useState<CopyState>("idle");
 
   const visibleRows = PIVOT_ROWS.filter((r) => visibleRowKeys.includes(r.key));
   const visibleCols = periods
     .map((p, i) => ({ p, value: values[i] }))
     .filter(({ p }) => visibleColKeys.includes(p.key));
 
-  function tsv(): string {
+  function buildTsv(): string {
     const lines: string[] = [];
     if (caption) lines.push(caption);
     lines.push(["Metric", ...visibleCols.map(({ p }) => p.label)].join("\t"));
@@ -91,24 +100,84 @@ export function PivotTable({
     return lines.join("\n");
   }
 
-  async function onCopy() {
+  async function copyAsImage() {
+    if (!tableRef.current) return;
+    setCopy("copying");
     try {
-      await navigator.clipboard.writeText(tsv());
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
+      // Render the table DOM to a PNG. cacheBust avoids a stale render
+      // when the user clicks Copy multiple times in quick succession.
+      const dataUrl = await toPng(tableRef.current, {
+        cacheBust: true,
+        pixelRatio: 2,
+        backgroundColor: "#ffffff",
+        // html-to-image inherits CSS variables but skips Tailwind utility
+        // classes that resolve to var(--color-...). Forcing a higher pixel
+        // ratio + white background sidesteps the most common rendering
+        // glitches (transparent rows, missing borders).
+      });
+      const blob = await (await fetch(dataUrl)).blob();
+      // Modern browsers accept image/png in the clipboard. ClipboardItem is
+      // gated to secure contexts (https/localhost) — fall back to TSV when
+      // the call is blocked.
+      try {
+        await navigator.clipboard.write([
+          new ClipboardItem({ "image/png": blob }),
+        ]);
+        setCopy("image-ok");
+      } catch {
+        await navigator.clipboard.writeText(buildTsv());
+        setCopy("tsv-fallback");
+      }
     } catch {
-      /* clipboard blocked — fail silently */
+      // Image rendering failed — last-ditch fallback to plain TSV.
+      try {
+        await navigator.clipboard.writeText(buildTsv());
+        setCopy("tsv-fallback");
+      } catch {
+        setCopy("error");
+      }
+    }
+    window.setTimeout(() => setCopy("idle"), 2000);
+  }
+
+  async function copyAsText() {
+    try {
+      await navigator.clipboard.writeText(buildTsv());
+      setCopy("tsv-fallback");
+      window.setTimeout(() => setCopy("idle"), 1500);
+    } catch {
+      setCopy("error");
+      window.setTimeout(() => setCopy("idle"), 1500);
     }
   }
 
+  const t = SLICE_TONES[tone];
+  const showRail = tone !== "neutral";
+
   return (
-    <div className="overflow-hidden rounded-lg border border-[color:var(--color-border-subtle)] bg-white">
-      {(caption || true) ? (
-        <div className="flex items-center justify-between gap-2 border-b border-[color:var(--color-border-subtle)] bg-[color:var(--color-jbp-cream)]/40 px-4 py-2.5">
+    <div
+      ref={tableRef}
+      className="overflow-hidden rounded-lg border border-[color:var(--color-border-subtle)] bg-white"
+      style={{
+        borderLeft: showRail ? `4px solid ${t.rail}` : undefined,
+      }}
+    >
+      <div
+        className="flex items-center justify-between gap-2 px-4 py-2.5"
+        style={{
+          background: t.bg,
+          borderBottom: `1px solid ${t.border}`,
+        }}
+      >
+        <div className="flex items-center gap-2">
           {caption ? (
             <span
-              className="font-display text-[color:var(--color-text-primary)]"
-              style={{ fontSize: 14, letterSpacing: "0.06em" }}
+              className="font-display"
+              style={{
+                fontSize: 14,
+                letterSpacing: "0.06em",
+                color: t.text,
+              }}
             >
               {caption}
             </span>
@@ -117,29 +186,63 @@ export function PivotTable({
               {visibleRows.length} rows · {visibleCols.length} columns
             </span>
           )}
+          {tone !== "neutral" ? (
+            <span
+              className="inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em]"
+              style={{ background: t.chipBg, color: t.chipText }}
+            >
+              {tone === "bathrooms" ? "B" : tone === "sewers" ? "S" : "T"}
+            </span>
+          ) : null}
+        </div>
+        <div className="flex items-center gap-1">
           <button
             type="button"
-            onClick={onCopy}
-            title="Copy as tab-separated values (paste into Slack / Sheets)"
+            onClick={copyAsText}
+            title="Copy as tab-separated values"
+            className="inline-flex h-7 items-center gap-1 rounded-md border border-[color:var(--color-border-subtle)] bg-white px-2 text-[11px] font-medium text-[color:var(--color-text-secondary)] transition-colors hover:bg-[color:var(--color-surface-hover)] hover:text-[color:var(--color-text-primary)]"
+          >
+            <Copy className="h-3 w-3" />
+            TSV
+          </button>
+          <button
+            type="button"
+            onClick={copyAsImage}
+            disabled={copy === "copying"}
+            title="Copy table as PNG image (paste in Slack)"
             className={cn(
-              "inline-flex items-center gap-1.5 rounded-md border border-[color:var(--color-border-subtle)] bg-white px-2 py-1 text-[11px] font-medium transition-colors",
-              copied
+              "inline-flex h-7 items-center gap-1.5 rounded-md border bg-white px-2 text-[11px] font-medium transition-colors",
+              copy === "image-ok"
                 ? "border-[color:var(--color-positive)] text-[color:var(--color-positive)]"
-                : "text-[color:var(--color-text-secondary)] hover:bg-[color:var(--color-surface-hover)] hover:text-[color:var(--color-text-primary)]",
+                : copy === "tsv-fallback"
+                  ? "border-[color:var(--color-warning)] text-[color:var(--color-warning)]"
+                  : copy === "error"
+                    ? "border-[color:var(--color-negative)] text-[color:var(--color-negative)]"
+                    : "border-[color:var(--color-border-subtle)] text-[color:var(--color-text-primary)] hover:bg-[color:var(--color-surface-hover)]",
             )}
           >
-            {copied ? (
+            {copy === "copying" ? (
               <>
-                <Check className="h-3 w-3" /> Copied
+                <ImageIcon className="h-3 w-3 animate-pulse" /> Rendering…
               </>
+            ) : copy === "image-ok" ? (
+              <>
+                <Check className="h-3 w-3" /> Image copied
+              </>
+            ) : copy === "tsv-fallback" ? (
+              <>
+                <Check className="h-3 w-3" /> TSV copied
+              </>
+            ) : copy === "error" ? (
+              "Copy failed"
             ) : (
               <>
-                <Copy className="h-3 w-3" /> Copy
+                <ImageIcon className="h-3 w-3" /> Copy as image
               </>
             )}
           </button>
         </div>
-      ) : null}
+      </div>
       <div className="overflow-auto">
         <table className="w-full border-collapse text-[14px]">
           <thead className="bg-white">
@@ -198,19 +301,14 @@ export function PivotTable({
   );
 }
 
+/* ----------------------------- Customize popover ----------------------------- */
+
 interface PivotCustomizeProps {
-  /** Available column definitions (keys + labels). */
   columns: { key: string; label: string }[];
   visibleRowKeys: string[];
   visibleColKeys: string[];
 }
 
-/**
- * Customize popover for the Performance Over Time pivot. Toggling a row or
- * column writes a comma-separated list to the URL (?pivotRows=, ?pivotCols=)
- * — empty value means "show all". Persistent + shareable + scoped to the
- * page.
- */
 export function PivotCustomize({
   columns,
   visibleRowKeys,
@@ -237,6 +335,8 @@ export function PivotCustomize({
     };
   }, [open]);
 
+  const totalRows = PIVOT_ROWS.length;
+
   return (
     <div ref={wrapperRef} className="relative">
       <button
@@ -250,22 +350,25 @@ export function PivotCustomize({
       >
         <Settings2 className="h-3.5 w-3.5" />
         Customize
+        <span className="rounded bg-[color:var(--color-surface-hover)] px-1 py-0.5 text-[10px] font-mono tabular-nums text-[color:var(--color-text-secondary)]">
+          {visibleRowKeys.length}/{totalRows} rows
+        </span>
       </button>
       {open ? (
         <div
           role="dialog"
           aria-label="Customize pivot"
-          className="absolute right-0 top-[calc(100%+6px)] z-40 w-[480px] overflow-hidden rounded-lg border border-[color:var(--color-border-subtle)] bg-white shadow-xl"
+          className="absolute right-0 top-[calc(100%+6px)] z-40 w-[520px] overflow-hidden rounded-lg border border-[color:var(--color-border-subtle)] bg-white shadow-xl"
         >
           <div className="grid grid-cols-2 divide-x divide-[color:var(--color-border-subtle)]">
             <CustomizeColumn
-              title="Rows"
+              title={`Rows · ${visibleRowKeys.length}/${PIVOT_ROWS.length}`}
               paramName="pivotRows"
               options={PIVOT_ROWS.map((r) => ({ key: r.key, label: r.label }))}
               value={visibleRowKeys}
             />
             <CustomizeColumn
-              title="Columns"
+              title={`Columns · ${visibleColKeys.length}/${columns.length}`}
               paramName="pivotCols"
               options={columns}
               value={visibleColKeys}
@@ -301,7 +404,12 @@ function CustomizeColumn({
 
   function applyNext(next: string[]) {
     const sp = new URLSearchParams(params?.toString() ?? "");
-    if (next.length === 0 || next.length === options.length) {
+    if (next.length === 0) {
+      // Empty selection = special "show none" — we encode as "_" so the
+      // page can disambiguate from "no param at all".
+      sp.set(paramName, "_none_");
+    } else if (next.length === options.length) {
+      // All on means we can drop the param entirely (default).
       sp.delete(paramName);
     } else {
       sp.set(paramName, next.join(","));
@@ -315,7 +423,7 @@ function CustomizeColumn({
   }
 
   return (
-    <div className="flex max-h-[360px] flex-col">
+    <div className="flex max-h-[420px] flex-col">
       <div className="flex items-center justify-between border-b border-[color:var(--color-border-subtle)] px-3 py-2">
         <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[color:var(--color-text-tertiary)]">
           {title}

@@ -1,6 +1,7 @@
 import { TopHeader } from "@/components/TopHeader";
 import { KpiCard } from "@/components/KpiCard";
 import { PivotTable, PivotCustomize } from "@/components/PivotTable";
+import { toneForLabel } from "@/lib/sliceColors";
 import { DailyTrendChart } from "@/components/DailyTrendChart";
 import { DayOfWeekChart } from "@/components/DayOfWeekChart";
 import { FunnelChart } from "@/components/FunnelChart";
@@ -402,6 +403,7 @@ export default async function Page({ searchParams }: PageProps) {
                 periods={pivotPeriods}
                 values={pivotValues}
                 caption={slices.length > 1 ? slice.label : undefined}
+                tone={slices.length > 1 ? toneForLabel(slice.label) : "neutral"}
                 visibleRowKeys={visibleRowKeys}
                 visibleColKeys={visibleColKeys}
               />

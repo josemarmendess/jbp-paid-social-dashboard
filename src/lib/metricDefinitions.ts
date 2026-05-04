@@ -34,6 +34,16 @@ export const METRIC_DEFS = {
   costPerBookedJob: "Spend divided by Booked Jobs.",
   averageSaleValue:
     "Sum of Sales divided by count of jobs that sold (Sales > 0). Excludes zeros for a realistic mean.",
+  impressions:
+    "Total ad impressions across all Meta placements in the selected period.",
+  linkClicks:
+    "Outbound link clicks captured by Meta. Higher than the on-page CTR when accounting for in-platform clicks.",
+  roas:
+    "Sales Revenue divided by Spend. Expressed as a multiple (e.g., 4.5x means $4.50 of revenue per $1 of ad spend).",
+  avgDaysToClose:
+    "Average number of days between a lead's Creation Date and its Sold On date. Lower is better.",
+  avgDaysToComplete:
+    "Average number of days between Sold On and Completed On for finished jobs.",
 } as const;
 
 export type MetricDefKey = keyof typeof METRIC_DEFS;

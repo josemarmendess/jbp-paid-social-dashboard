@@ -301,6 +301,19 @@ export interface PivotMetrics {
   spendOnRevenue: number | null; // percentage 0-100, null when revenue == 0
   averageSaleValue: number | null;
   cancellationRate: number | null; // percentage 0-100
+  // Round 3 additions — opt-in fields for the Customize popover. Defaults
+  // mirror the KPI grid's definitions so users see one consistent set.
+  soldJobs: number;
+  impressions: number;
+  linkClicks: number;
+  ctr: number | null; // 0-100 percent
+  leadRate: number | null; // 0-100 percent
+  bookRate: number | null; // 0-100 percent
+  showRate: number | null; // 0-100 percent
+  closeRate: number | null; // 0-100 percent
+  roas: number | null; // multiple, e.g., 4.5 = 4.5x
+  avgDaysToClose: number | null;
+  avgDaysToComplete: number | null;
 }
 
 /**
@@ -317,11 +330,15 @@ export function computePivotMetrics(
   const metaInBu = makeMetaBuMatcher(st, bu);
   let spend = 0;
   let leads = 0;
+  let impressions = 0;
+  let linkClicks = 0;
   for (const r of meta) {
     if (!inRange(r.date, range)) continue;
     if (!metaInBu(r)) continue;
     spend += Number(r.spend) || 0;
     leads += Number(r.results) || 0;
+    impressions += Number(r.impressions) || 0;
+    linkClicks += Number(r.link_clicks) || 0;
   }
   let bookedJobs = 0;
   // We use the ServiceTitan "Sales" column as the canonical revenue figure
@@ -331,6 +348,11 @@ export function computePivotMetrics(
   let soldCount = 0;
   let soldSalesOnly = 0;
   let cancelledCount = 0;
+  let completedCount = 0;
+  let daysToCloseSum = 0;
+  let daysToCloseN = 0;
+  let daysToCompleteSum = 0;
+  let daysToCompleteN = 0;
   for (const r of st) {
     if (!inRange(r["Creation Date"], range)) continue;
     if (!buMatches(r, bu)) continue;
@@ -341,7 +363,22 @@ export function computePivotMetrics(
       soldCount += 1;
       soldSalesOnly += sale;
     }
+    const status = String(r["Job Status"] ?? "").toLowerCase();
+    if (status.includes("complet")) completedCount += 1;
     if (isCancelled(r["Job Status"])) cancelledCount += 1;
+    const created = String(r["Creation Date"] ?? "");
+    const sold = String(r["Sold On"] ?? "");
+    const completed = String(r["Completed On"] ?? "");
+    const dClose = daysBetween(created, sold);
+    if (dClose !== null && dClose >= 0) {
+      daysToCloseSum += dClose;
+      daysToCloseN += 1;
+    }
+    const dComp = daysBetween(sold, completed);
+    if (dComp !== null && dComp >= 0) {
+      daysToCompleteSum += dComp;
+      daysToCompleteN += 1;
+    }
   }
   return {
     spend,
@@ -354,6 +391,18 @@ export function computePivotMetrics(
     averageSaleValue: soldCount > 0 ? soldSalesOnly / soldCount : null,
     cancellationRate:
       bookedJobs > 0 ? (cancelledCount / bookedJobs) * 100 : null,
+    soldJobs: soldCount,
+    impressions,
+    linkClicks,
+    ctr: impressions > 0 ? (linkClicks / impressions) * 100 : null,
+    leadRate: linkClicks > 0 ? (leads / linkClicks) * 100 : null,
+    bookRate: leads > 0 ? (bookedJobs / leads) * 100 : null,
+    showRate: bookedJobs > 0 ? (completedCount / bookedJobs) * 100 : null,
+    closeRate: bookedJobs > 0 ? (soldCount / bookedJobs) * 100 : null,
+    roas: spend > 0 ? salesTotal / spend : null,
+    avgDaysToClose: daysToCloseN > 0 ? daysToCloseSum / daysToCloseN : null,
+    avgDaysToComplete:
+      daysToCompleteN > 0 ? daysToCompleteSum / daysToCompleteN : null,
   };
 }
 
