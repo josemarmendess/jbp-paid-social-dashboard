@@ -18,7 +18,7 @@ import type {
   PaidSocialPayload,
 } from "@/lib/types";
 
-export const revalidate = 1800;
+export const revalidate = 300;
 
 interface PageProps {
   searchParams: Promise<{
@@ -127,6 +127,7 @@ export default async function PerformancePage({ searchParams }: PageProps) {
         breadcrumb="Dashboard / Performance"
         pageTitle="Performance"
         lastUpdated={lastUpdated}
+        generatedAt={data.generated_at}
         preset={preset}
         customStart={preset === "custom" ? period.current.startStr : undefined}
         customEnd={preset === "custom" ? period.current.endStr : undefined}

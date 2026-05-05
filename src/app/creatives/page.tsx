@@ -19,7 +19,7 @@ import type {
   PaidSocialPayload,
 } from "@/lib/types";
 
-export const revalidate = 1800;
+export const revalidate = 300;
 
 interface PageProps {
   searchParams: Promise<{
@@ -110,6 +110,7 @@ export default async function CreativesPage({ searchParams }: PageProps) {
         breadcrumb="Dashboard / Creatives"
         pageTitle="Creatives"
         lastUpdated={formatLastUpdated(data.generated_at)}
+        generatedAt={data.generated_at}
         preset={preset}
         customStart={preset === "custom" ? period.current.startStr : undefined}
         customEnd={preset === "custom" ? period.current.endStr : undefined}

@@ -64,6 +64,17 @@ function isPendingPipeline(status: unknown): boolean {
 }
 
 /**
+ * Tighter "open job" filter used by the Carryover Pipeline KPI per José's
+ * direction: count ONLY jobs whose status is exactly "Scheduled". InProgress
+ * and Hold are treated separately because mixing them with Scheduled in a
+ * single number conflates "ready to work" with "stuck" / "blocked", which
+ * isn't an operational signal we want surfaced in one count.
+ */
+function isScheduled(status: unknown): boolean {
+  return String(status ?? "").trim().toLowerCase() === "scheduled";
+}
+
+/**
  * Business rule: an ad is retargeting if its campaign name includes
  * "RETARGETING" or its ad name contains a "RET" token (e.g. "AD01 - IMG - RET - ...").
  * The user has confirmed every retargeting ad is for the Sewer service.
@@ -157,23 +168,82 @@ function buildBusinessUnitMap(st: ServiceTitanRow[]): Map<string, CanonicalServi
   return result;
 }
 
-/**
- * Per-request memo. The Performance page calls aggregateByAd transitively
- * three times (directly + via aggregateByAdset + via aggregateByBusinessUnit).
- * Memoizing by (meta, st, range) reference avoids re-walking the meta rows
- * each time. Cache lives only for the lifetime of the request because the
- * meta/st arrays come from a fresh fetch on every server render.
- */
+/* ---------------------------- Per-request memos ----------------------------
+ * All memos are WeakMap<MetaInsightRow[] | ServiceTitanRow[], Map<string, T>>.
+ * The outer key is the source array reference, which lives only for the
+ * lifetime of the request — fresh fetch on each render gives a fresh array,
+ * which lets the GC drop the cache automatically. The inner key is a stable
+ * string composition of the call args so equal calls collapse.
+ *
+ * Without these caches, /?view=all (3 slices) re-walks the 2.4k Meta rows
+ * 6× for daily KPI series, 3× for trend, and 21× for the pivot. With them,
+ * each unique (range/dates × bu) combo is computed once and reused.
+ * --------------------------------------------------------------------------*/
+
 const adAggCache = new WeakMap<
   MetaInsightRow[],
   Map<string, AggregatedAd[]>
 >();
 
+const dailyKpiCache = new WeakMap<
+  MetaInsightRow[],
+  Map<string, DailyKpiPoint[]>
+>();
+const dailySpendCache = new WeakMap<
+  MetaInsightRow[],
+  Map<string, DailySeriesPoint[]>
+>();
+const pivotCache = new WeakMap<
+  MetaInsightRow[],
+  Map<string, PivotMetrics>
+>();
+const cancelSeriesCache = new WeakMap<
+  ServiceTitanRow[],
+  Map<string, CancellationPoint[]>
+>();
+const showSeriesCache = new WeakMap<
+  ServiceTitanRow[],
+  Map<string, CancellationPoint[]>
+>();
+const monthlyKpiCache = new WeakMap<
+  MetaInsightRow[],
+  Map<string, MonthlyKpiRow[]>
+>();
+const funnelCache = new WeakMap<
+  MetaInsightRow[],
+  Map<string, FunnelMetrics>
+>();
+
+/** Stable BU key for cache composition. Empty array, "All", and undefined all
+ *  hash to the same string so cross-page traffic dedupes correctly. */
+function buCacheKey(bu: BusinessUnit): string {
+  if (!bu || bu === "All") return "*";
+  if (Array.isArray(bu)) {
+    if (bu.length === 0) return "*";
+    return bu
+      .map((b) => normalizeService(b))
+      .sort()
+      .join(",");
+  }
+  return normalizeService(bu);
+}
+
+function rangeCacheKey(range: DateRange): string {
+  return `${range.startStr}|${range.endStr}`;
+}
+
+function datesCacheKey(dates: string[]): string {
+  // First, last, and length is a probabilistic key — collisions only happen
+  // if the caller hands us a different array with the same boundaries, which
+  // never occurs for the rolling-window helpers we drive this with.
+  return `${dates.length}|${dates[0] ?? ""}|${dates[dates.length - 1] ?? ""}`;
+}
+
 function adCacheKey(st: ServiceTitanRow[], range: DateRange): string {
-  // st reference isn't part of the WeakMap key but should disambiguate
+  // ST reference isn't part of the WeakMap key but should disambiguate
   // pages that build different ST slices over the same meta array.
   // We rely on shared ST identity per request, which the fetch layer gives us.
-  return `${range.startStr}|${range.endStr}|${st.length}`;
+  return `${rangeCacheKey(range)}|${st.length}`;
 }
 
 export function aggregateByAd(
@@ -334,6 +404,14 @@ export function computePivotMetrics(
   range: DateRange,
   bu: BusinessUnit,
 ): PivotMetrics {
+  let bucket = pivotCache.get(meta);
+  if (!bucket) {
+    bucket = new Map();
+    pivotCache.set(meta, bucket);
+  }
+  const ck = `${rangeCacheKey(range)}|${st.length}|${buCacheKey(bu)}`;
+  const cached = bucket.get(ck);
+  if (cached) return cached;
   const metaInBu = makeMetaBuMatcher(st, bu);
   let spend = 0;
   let leads = 0;
@@ -353,6 +431,7 @@ export function computePivotMetrics(
   // the "Revenue" column here would split the dashboard's source of truth.
   let salesTotal = 0;
   let soldCount = 0;
+  // (out + bucket.set are at the bottom; the local `out` is built inline.)
   let soldSalesOnly = 0;
   let cancelledCount = 0;
   let completedCount = 0;
@@ -387,7 +466,7 @@ export function computePivotMetrics(
       daysToCompleteN += 1;
     }
   }
-  return {
+  const out: PivotMetrics = {
     spend,
     leads,
     costPerLead: leads > 0 ? spend / leads : null,
@@ -411,12 +490,16 @@ export function computePivotMetrics(
     avgDaysToComplete:
       daysToCompleteN > 0 ? daysToCompleteSum / daysToCompleteN : null,
   };
+  bucket.set(ck, out);
+  return out;
 }
 
 /**
  * Carryover Pipeline = ST rows whose Creation Date sits in the supplied range
- * AND whose Job Status is non-final (not Completed/Canceled/Sold). Captures
- * leads generated last month that are still open in the current month.
+ * AND whose Job Status is exactly "Scheduled". Captures last-month leads
+ * that have a confirmed appointment but haven't been worked yet — a clean
+ * "actionable backlog" number. InProgress + Hold are deliberately excluded
+ * (see isScheduled doc).
  */
 export function computeCarryoverPipeline(
   st: ServiceTitanRow[],
@@ -427,7 +510,7 @@ export function computeCarryoverPipeline(
   for (const r of st) {
     if (!inRange(r["Creation Date"], range)) continue;
     if (!buMatches(r, bu)) continue;
-    if (!isPendingPipeline(r["Job Status"])) continue;
+    if (!isScheduled(r["Job Status"])) continue;
     n += 1;
   }
   return n;
@@ -449,6 +532,14 @@ export function dailySpendVsRevenue(
   dates: string[],
   bu: BusinessUnit,
 ): DailySeriesPoint[] {
+  let bucket = dailySpendCache.get(meta);
+  if (!bucket) {
+    bucket = new Map();
+    dailySpendCache.set(meta, bucket);
+  }
+  const key = `${datesCacheKey(dates)}|${st.length}|${buCacheKey(bu)}`;
+  const cached = bucket.get(key);
+  if (cached) return cached;
   const metaInBu = makeMetaBuMatcher(st, bu);
   const idx = new Map<string, DailySeriesPoint>();
   for (const d of dates) idx.set(d, { date: d, spend: 0, revenue: 0 });
@@ -464,7 +555,9 @@ export function dailySpendVsRevenue(
     if (!buMatches(r, bu)) continue;
     p.revenue += Number(r["Revenue"]) || 0;
   }
-  return dates.map((d) => idx.get(d)!);
+  const result = dates.map((d) => idx.get(d)!);
+  bucket.set(key, result);
+  return result;
 }
 
 export interface FunnelMetrics {
@@ -481,6 +574,14 @@ export function computeFunnel(
   range: DateRange,
   bu: BusinessUnit,
 ): FunnelMetrics {
+  let bucket = funnelCache.get(meta);
+  if (!bucket) {
+    bucket = new Map();
+    funnelCache.set(meta, bucket);
+  }
+  const ck = `${rangeCacheKey(range)}|${st.length}|${buCacheKey(bu)}`;
+  const cached = bucket.get(ck);
+  if (cached) return cached;
   const metaInBu = makeMetaBuMatcher(st, bu);
   let impressions = 0;
   let linkClicks = 0;
@@ -500,7 +601,9 @@ export function computeFunnel(
     bookedJobs += 1;
     if ((Number(r["Sales"]) || 0) > 0) soldJobs += 1;
   }
-  return { impressions, linkClicks, leads, bookedJobs, soldJobs };
+  const out = { impressions, linkClicks, leads, bookedJobs, soldJobs };
+  bucket.set(ck, out);
+  return out;
 }
 
 export interface CancellationPoint {
@@ -538,6 +641,14 @@ export function cancellationRateSeries(
   granularity: "week" | "month",
   buckets: number,
 ): CancellationPoint[] {
+  let cBucket = cancelSeriesCache.get(st);
+  if (!cBucket) {
+    cBucket = new Map();
+    cancelSeriesCache.set(st, cBucket);
+  }
+  const ck = `${granularity}|${buckets}|${buCacheKey(bu)}`;
+  const cached = cBucket.get(ck);
+  if (cached) return cached;
   const counts = new Map<string, { total: number; cancelled: number }>();
   for (const r of st) {
     if (!buMatches(r, bu)) continue;
@@ -559,13 +670,15 @@ export function cancellationRateSeries(
   }
   const sortedKeys = Array.from(counts.keys()).sort();
   const recent = sortedKeys.slice(-buckets);
-  return recent.map((k) => {
+  const out = recent.map((k) => {
     const c = counts.get(k)!;
     return {
       bucket: k,
       rate: c.total > 0 ? (c.cancelled / c.total) * 100 : null,
     };
   });
+  cBucket.set(ck, out);
+  return out;
 }
 
 export interface AggregatedCampaign {
@@ -727,6 +840,14 @@ export function dailyKpiSeries(
   dates: string[],
   bu: BusinessUnit,
 ): DailyKpiPoint[] {
+  let bucket = dailyKpiCache.get(meta);
+  if (!bucket) {
+    bucket = new Map();
+    dailyKpiCache.set(meta, bucket);
+  }
+  const key = `${datesCacheKey(dates)}|${st.length}|${buCacheKey(bu)}`;
+  const cached = bucket.get(key);
+  if (cached) return cached;
   const metaInBu = makeMetaBuMatcher(st, bu);
   const idx = new Map<string, DailyKpiPoint>();
   for (const d of dates) {
@@ -766,7 +887,9 @@ export function dailyKpiSeries(
     if (status.includes("complet")) p.completedJobs += 1;
     if (isCancelled(r["Job Status"])) p.cancelledJobs += 1;
   }
-  return dates.map((d) => idx.get(d)!);
+  const result = dates.map((d) => idx.get(d)!);
+  bucket.set(key, result);
+  return result;
 }
 
 /**
@@ -782,6 +905,8 @@ export interface OverviewKpiTotals {
   soldJobs: number;
   sales: number;
   spendOnRevenue: number; // 0-1 (spend/revenue), 0 when no revenue
+  costPerLead: number; // spend / leads, 0 when no leads
+  costPerBookedJob: number; // spend / booked jobs, 0 when no bookings
   ctr: number; // link_clicks / impressions
   leadRate: number; // leads / link_clicks
   bookRate: number; // booked / leads
@@ -915,6 +1040,8 @@ export function computeOverviewKpis(
     // Use Sales (the canonical "Sales Revenue") so this KPI matches the
     // pivot table's Spend on Revenue row.
     spendOnRevenue: s.sales > 0 ? m.spend / s.sales : 0,
+    costPerLead: m.leads > 0 ? m.spend / m.leads : 0,
+    costPerBookedJob: s.booked > 0 ? m.spend / s.booked : 0,
     ctr: m.impressions > 0 ? m.linkClicks / m.impressions : 0,
     leadRate: m.linkClicks > 0 ? m.leads / m.linkClicks : 0,
     bookRate: m.leads > 0 ? s.booked / m.leads : 0,
@@ -1181,11 +1308,12 @@ export function aggregateByBusinessUnit(
 }
 
 export interface PipelineMetrics {
+  /** Last-month leads currently with status === "Scheduled". */
   carryover: number;
-  pendingValue: number; // average sale value × pending bookings
   avgDaysToClose: number | null; // Creation Date → Sold On
   avgDaysToComplete: number | null; // Sold On → Completed On
-  totalPipelineCount: number; // total pending across whole dataset (not just last month)
+  /** Total pending across the whole dataset (Scheduled + InProgress + Hold). */
+  totalPipelineCount: number;
 }
 
 function daysBetween(a: string | undefined, b: string | undefined): number | null {
@@ -1206,8 +1334,6 @@ export function computePipelineMetrics(
 ): PipelineMetrics {
   let carryover = 0;
   let totalPending = 0;
-  let soldCount = 0;
-  let soldRevenue = 0;
   let daysToCloseSum = 0;
   let daysToCloseN = 0;
   let daysToCompleteSum = 0;
@@ -1217,12 +1343,12 @@ export function computePipelineMetrics(
     if (!buMatches(r, bu)) continue;
     if (isPendingPipeline(r["Job Status"])) {
       totalPending += 1;
-      if (inRange(r["Creation Date"], carryoverRange)) carryover += 1;
     }
-    const sale = Number(r["Sales"]) || 0;
-    if (sale > 0) {
-      soldCount += 1;
-      soldRevenue += sale;
+    if (
+      isScheduled(r["Job Status"]) &&
+      inRange(r["Creation Date"], carryoverRange)
+    ) {
+      carryover += 1;
     }
     const created = String(r["Creation Date"] ?? "");
     const sold = String(r["Sold On"] ?? "");
@@ -1238,12 +1364,11 @@ export function computePipelineMetrics(
       daysToCompleteN += 1;
     }
   }
-  const avgSaleValue = soldCount > 0 ? soldRevenue / soldCount : 0;
   return {
     carryover,
-    pendingValue: avgSaleValue * totalPending,
     avgDaysToClose: daysToCloseN > 0 ? daysToCloseSum / daysToCloseN : null,
-    avgDaysToComplete: daysToCompleteN > 0 ? daysToCompleteSum / daysToCompleteN : null,
+    avgDaysToComplete:
+      daysToCompleteN > 0 ? daysToCompleteSum / daysToCompleteN : null,
     totalPipelineCount: totalPending,
   };
 }
@@ -1302,6 +1427,14 @@ export function showRateSeries(
   granularity: "week" | "month",
   buckets: number,
 ): CancellationPoint[] {
+  let sBucket = showSeriesCache.get(st);
+  if (!sBucket) {
+    sBucket = new Map();
+    showSeriesCache.set(st, sBucket);
+  }
+  const ck = `${granularity}|${buckets}|${buCacheKey(bu)}`;
+  const cached = sBucket.get(ck);
+  if (cached) return cached;
   const counts = new Map<string, { total: number; completed: number }>();
   for (const r of st) {
     if (!buMatches(r, bu)) continue;
@@ -1325,13 +1458,15 @@ export function showRateSeries(
   }
   const sortedKeys = Array.from(counts.keys()).sort();
   const recent = sortedKeys.slice(-buckets);
-  return recent.map((k) => {
+  const out = recent.map((k) => {
     const c = counts.get(k)!;
     return {
       bucket: k,
       rate: c.total > 0 ? (c.completed / c.total) * 100 : null,
     };
   });
+  sBucket.set(ck, out);
+  return out;
 }
 
 /* ------------------------- History page: month buckets ------------------------- */
@@ -1364,6 +1499,14 @@ export function monthlyKpiSeries(
   bu: BusinessUnit,
   monthsBack: number,
 ): MonthlyKpiRow[] {
+  let mBucket = monthlyKpiCache.get(meta);
+  if (!mBucket) {
+    mBucket = new Map();
+    monthlyKpiCache.set(meta, mBucket);
+  }
+  const ck = `${monthsBack}|${st.length}|${buCacheKey(bu)}`;
+  const cached = mBucket.get(ck);
+  if (cached) return cached;
   const today = (() => {
     const parts = new Intl.DateTimeFormat("en-CA", {
       timeZone: "America/Chicago",
@@ -1438,7 +1581,7 @@ export function monthlyKpiSeries(
     if (isCancelled(r["Job Status"])) b.cancelledJobs += 1;
   }
   const safe = (n: number, d: number) => (d > 0 ? n / d : 0);
-  return months.map((m) => {
+  const out = months.map((m) => {
     const b = buckets.get(m)!;
     return {
       month: m,
@@ -1456,6 +1599,8 @@ export function monthlyKpiSeries(
       cancellationRate: safe(b.cancelledJobs, b.bookedJobs),
     };
   });
+  mBucket.set(ck, out);
+  return out;
 }
 
 /* ------------------------- Funnel page: rate series ------------------------- */

@@ -11,7 +11,7 @@ import {
 } from "@/lib/buFilter";
 import type { PaidSocialPayload } from "@/lib/types";
 
-export const revalidate = 1800;
+export const revalidate = 300;
 
 interface PageProps {
   searchParams: Promise<{
@@ -83,6 +83,7 @@ export default async function GeographyPage({ searchParams }: PageProps) {
         breadcrumb="Dashboard / Geography"
         pageTitle="Geography"
         lastUpdated={formatLastUpdated(data.generated_at)}
+        generatedAt={data.generated_at}
         preset={preset}
         customStart={preset === "custom" ? period.current.startStr : undefined}
         customEnd={preset === "custom" ? period.current.endStr : undefined}

@@ -1,5 +1,6 @@
 import { BusinessUnitFilter } from "@/components/BusinessUnitFilter";
 import { DateRangePicker } from "@/components/DateRangePicker";
+import { FreshnessIndicator } from "@/components/FreshnessIndicator";
 import { RefreshButton } from "@/components/RefreshButton";
 import { ServiceViewToggle } from "@/components/ServiceViewToggle";
 import { buListLabel, type ServiceView } from "@/lib/buFilter";
@@ -7,7 +8,10 @@ import type { DateRangePreset } from "@/lib/types";
 
 interface TopHeaderProps {
   pageTitle: string;
+  /** Pre-formatted "Updated …" string — used as a static fallback. */
   lastUpdated: string;
+  /** Raw Apps Script generated_at — drives the live freshness ticker. */
+  generatedAt?: string;
   preset: DateRangePreset;
   customStart?: string;
   customEnd?: string;
@@ -27,6 +31,7 @@ interface TopHeaderProps {
 export function TopHeader({
   pageTitle,
   lastUpdated,
+  generatedAt,
   preset,
   customStart,
   customEnd,
@@ -68,9 +73,13 @@ export function TopHeader({
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <span className="hidden text-[11px] tabular-nums text-[color:var(--color-text-tertiary)] xl:inline">
-          {lastUpdated}
-        </span>
+        {generatedAt ? (
+          <FreshnessIndicator generatedAt={generatedAt} />
+        ) : (
+          <span className="hidden text-[11px] tabular-nums text-[color:var(--color-text-tertiary)] xl:inline">
+            {lastUpdated}
+          </span>
+        )}
         <DateRangePicker
           initial={preset}
           customStart={preset === "custom" ? customStart : undefined}

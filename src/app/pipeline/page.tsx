@@ -19,10 +19,10 @@ import {
   parseBuList,
   parseView,
 } from "@/lib/buFilter";
-import { formatCurrency, formatInt } from "@/lib/format";
+import { formatInt } from "@/lib/format";
 import type { PaidSocialPayload } from "@/lib/types";
 
-export const revalidate = 1800;
+export const revalidate = 300;
 
 interface PageProps {
   searchParams: Promise<{
@@ -132,6 +132,7 @@ export default async function PipelinePage({ searchParams }: PageProps) {
         breadcrumb="Dashboard / Pipeline"
         pageTitle="Pipeline"
         lastUpdated={formatLastUpdated(data.generated_at)}
+        generatedAt={data.generated_at}
         preset={preset}
         customStart={preset === "custom" ? period.current.startStr : undefined}
         customEnd={preset === "custom" ? period.current.endStr : undefined}
@@ -163,11 +164,11 @@ export default async function PipelinePage({ searchParams }: PageProps) {
                 <span className="h-[1px] flex-1 bg-[color:var(--color-border-subtle)]" />
               </div>
             ) : null}
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <PipelineKpiCard
                 label="Carryover Pipeline"
                 value={formatInt(pipeline.carryover)}
-                subtitle={`Last month leads still pending (${lastMonth.startStr} → ${lastMonth.endStr})`}
+                subtitle={`Last month leads with status "Scheduled" (${lastMonth.startStr} → ${lastMonth.endStr})`}
                 badge={
                   pipeline.carryover > 0
                     ? { tone: "warning", text: "Action" }
@@ -191,12 +192,6 @@ export default async function PipelinePage({ searchParams }: PageProps) {
                     : "—"
                 }
                 subtitle="Sold On → Completed On"
-              />
-              <PipelineKpiCard
-                label="Pipeline Value"
-                value={formatCurrency(pipeline.pendingValue)}
-                subtitle={`${formatInt(pipeline.totalPipelineCount)} pending × avg sale value`}
-                badge={{ tone: "neutral", text: "Estimate" }}
               />
             </div>
           </section>

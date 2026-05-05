@@ -43,7 +43,7 @@ import {
 import { goalChip, parseGoalTargets } from "@/lib/goals";
 import type { PaidSocialPayload } from "@/lib/types";
 
-export const revalidate = 1800;
+export const revalidate = 300;
 
 interface PageProps {
   searchParams: Promise<{
@@ -160,6 +160,10 @@ export default async function Page({ searchParams }: PageProps) {
       sold: sparkRows.map((r) => r.soldJobs),
       sales: sparkRows.map((r) => r.sales),
       spendOnRevenue: sparkRows.map((r) => safeRatio(r.spend, r.revenue)),
+      costPerLead: sparkRows.map((r) => safeRatio(r.spend, r.leads)),
+      costPerBookedJob: sparkRows.map((r) =>
+        safeRatio(r.spend, r.bookedJobs),
+      ),
       ctr: sparkRows.map((r) => safeRatio(r.linkClicks, r.impressions)),
       leadRate: sparkRows.map((r) => safeRatio(r.leads, r.linkClicks)),
       bookRate: sparkRows.map((r) => safeRatio(r.bookedJobs, r.leads)),
@@ -228,6 +232,7 @@ export default async function Page({ searchParams }: PageProps) {
         breadcrumb="Dashboard"
         pageTitle="Overview"
         lastUpdated={lastUpdated}
+        generatedAt={data.generated_at}
         preset={preset}
         customStart={preset === "custom" ? period.current.startStr : undefined}
         customEnd={preset === "custom" ? period.current.endStr : undefined}
@@ -261,7 +266,8 @@ export default async function Page({ searchParams }: PageProps) {
             className="flex flex-col gap-3"
           >
             {slices.length > 1 ? <SliceHeader label={slice.label} /> : null}
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-6">
+            {/* Row 1 (Volume + Cost): 7 cards */}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-4 xl:grid-cols-7">
               <KpiCard
                 label="Spend"
                 value={formatCurrency(current.spend)}
@@ -280,12 +286,37 @@ export default async function Page({ searchParams }: PageProps) {
                 tooltip={METRIC_DEFS.leads}
               />
               <KpiCard
+                label="Cost per Lead"
+                value={current.costPerLead ? formatCurrency(current.costPerLead, true) : "—"}
+                current={current.costPerLead}
+                previous={previous.costPerLead}
+                invertDelta
+                sparkline={sparks.costPerLead}
+                hint="spend / leads"
+                tooltip={METRIC_DEFS.costPerLead}
+                goalChip={goalChip(
+                  "cpl",
+                  current.costPerLead,
+                  targets.cplTarget,
+                )}
+              />
+              <KpiCard
                 label="Booked Jobs"
                 value={formatInt(current.bookedJobs)}
                 current={current.bookedJobs}
                 previous={previous.bookedJobs}
                 sparkline={sparks.booked}
                 tooltip={METRIC_DEFS.bookedJobs}
+              />
+              <KpiCard
+                label="Cost per Booked"
+                value={current.costPerBookedJob ? formatCurrency(current.costPerBookedJob, true) : "—"}
+                current={current.costPerBookedJob}
+                previous={previous.costPerBookedJob}
+                invertDelta
+                sparkline={sparks.costPerBookedJob}
+                hint="spend / booked"
+                tooltip={METRIC_DEFS.costPerBookedJob}
               />
               <KpiCard
                 label="Sold Jobs"
@@ -303,6 +334,9 @@ export default async function Page({ searchParams }: PageProps) {
                 sparkline={sparks.sales}
                 tooltip={METRIC_DEFS.salesRevenue}
               />
+            </div>
+            {/* Row 2 (Rates): 7 cards */}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-4 xl:grid-cols-7">
               <KpiCard
                 label="Spend on Revenue"
                 value={current.spendOnRevenue ? formatPercent(current.spendOnRevenue) : "—"}
