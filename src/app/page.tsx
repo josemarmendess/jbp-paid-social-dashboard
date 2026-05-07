@@ -9,17 +9,16 @@ import { CancellationRateChart } from "@/components/CancellationRateChart";
 import { AnomalyBanner } from "@/components/AnomalyBanner";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { fetchPaidSocialData } from "@/lib/fetchData";
-import { getPeriod, parsePreset } from "@/lib/dateRange";
 import {
-  cancellationRateSeries,
-  computeFunnel,
-  computeOverviewKpis,
-  computePivotMetrics,
-  dailyKpiSeries,
-  dailySpendVsRevenue,
-  detectAnomalies,
-  listBusinessUnits,
-} from "@/lib/aggregate";
+  cachedCancellationSeries,
+  cachedDailyKpiSeries,
+  cachedDailySpendVsRevenue,
+  cachedFunnel,
+  cachedOverviewKpis,
+  cachedPivotMetrics,
+} from "@/lib/cachedAggregate";
+import { getPeriod, parsePreset } from "@/lib/dateRange";
+import { detectAnomalies, listBusinessUnits } from "@/lib/aggregate";
 import {
   getPivotPeriods,
   getRollingRange,
@@ -109,12 +108,7 @@ export default async function Page({ searchParams }: PageProps) {
   // Anomaly detection runs on the unfiltered series — anomalies are most
   // useful at the account level. Computed once here.
   const sparkDates30 = rollingDaysList(30);
-  const anomalyRows = dailyKpiSeries(
-    data.meta_insights,
-    data.servicetitan_social_leads,
-    sparkDates30,
-    [],
-  );
+  const anomalyRows = await cachedDailyKpiSeries(sparkDates30, []);
   const anomalies = detectAnomalies(anomalyRows);
 
   const pivotPeriods = getPivotPeriods();
@@ -129,100 +123,74 @@ export default async function Page({ searchParams }: PageProps) {
   const trendDates = rollingDaysList(90);
   const dowDates = rollingDaysList(30);
 
-  // Build per-slice data once. Each slice holds its current/previous KPIs,
-  // 30d sparkline series, pivot row values, and the trend chart inputs.
-  const sliceData = slices.map((slice) => {
-    const current = computeOverviewKpis(
-      data!.meta_insights,
-      data!.servicetitan_social_leads,
-      period.current,
-      slice.bu,
-    );
-    const previous = computeOverviewKpis(
-      data!.meta_insights,
-      data!.servicetitan_social_leads,
-      period.previous,
-      slice.bu,
-    );
-    const sparkRows = dailyKpiSeries(
-      data!.meta_insights,
-      data!.servicetitan_social_leads,
-      sparkDates30,
-      slice.bu,
-    );
-    const safeRatio = (n: number, d: number) => (d > 0 ? n / d : 0);
-    const sparks = {
-      spend: sparkRows.map((r) => r.spend),
-      leads: sparkRows.map((r) => r.leads),
-      booked: sparkRows.map((r) => r.bookedJobs),
-      sold: sparkRows.map((r) => r.soldJobs),
-      sales: sparkRows.map((r) => r.sales),
-      spendOnRevenue: sparkRows.map((r) => safeRatio(r.spend, r.revenue)),
-      costPerLead: sparkRows.map((r) => safeRatio(r.spend, r.leads)),
-      costPerBookedJob: sparkRows.map((r) =>
-        safeRatio(r.spend, r.bookedJobs),
-      ),
-      ctr: sparkRows.map((r) => safeRatio(r.linkClicks, r.impressions)),
-      leadRate: sparkRows.map((r) => safeRatio(r.leads, r.linkClicks)),
-      bookRate: sparkRows.map((r) => safeRatio(r.bookedJobs, r.leads)),
-      showRate: sparkRows.map((r) => safeRatio(r.completedJobs, r.bookedJobs)),
-      closeRate: sparkRows.map((r) => safeRatio(r.soldJobs, r.bookedJobs)),
-      cancellationRate: sparkRows.map((r) =>
-        safeRatio(r.cancelledJobs, r.bookedJobs),
-      ),
-    };
-    const pivotValues = pivotPeriods.map((p) =>
-      computePivotMetrics(
-        data!.meta_insights,
-        data!.servicetitan_social_leads,
-        p.range,
-        slice.bu,
-      ),
-    );
-    const trend = dailySpendVsRevenue(
-      data!.meta_insights,
-      data!.servicetitan_social_leads,
-      trendDates,
-      slice.bu,
-    );
-    const dowSeries = dailyKpiSeries(
-      data!.meta_insights,
-      data!.servicetitan_social_leads,
-      dowDates,
-      slice.bu,
-    );
-    const funnel = computeFunnel(
-      data!.meta_insights,
-      data!.servicetitan_social_leads,
-      period.current,
-      slice.bu,
-    );
-    const weeklyAll = cancellationRateSeries(
-      data!.servicetitan_social_leads,
-      slice.bu,
-      "week",
-      52,
-    );
-    const monthlyAll = cancellationRateSeries(
-      data!.servicetitan_social_leads,
-      slice.bu,
-      "month",
-      48,
-    );
-
-    return {
-      slice,
-      current,
-      previous,
-      sparks,
-      pivotValues,
-      trend,
-      dowSeries,
-      funnel,
-      weeklyAll,
-      monthlyAll,
-    };
-  });
+  // Per-slice payload. Each slice's nine inputs run in parallel via
+  // Promise.all; slices themselves also run concurrently. On a warm cache,
+  // every call resolves instantly from "use cache" without re-walking the
+  // 2.4k+ Meta rows. On a cold cache, the parallelism only matters for the
+  // first request — subsequent renders with the same (range, bu, view)
+  // collapse to cache hits.
+  const sliceData = await Promise.all(
+    slices.map(async (slice) => {
+      const [
+        current,
+        previous,
+        sparkRows,
+        pivotValues,
+        trend,
+        dowSeries,
+        funnel,
+        weeklyAll,
+        monthlyAll,
+      ] = await Promise.all([
+        cachedOverviewKpis(period.current, slice.bu),
+        cachedOverviewKpis(period.previous, slice.bu),
+        cachedDailyKpiSeries(sparkDates30, slice.bu),
+        Promise.all(
+          pivotPeriods.map((p) => cachedPivotMetrics(p.range, slice.bu)),
+        ),
+        cachedDailySpendVsRevenue(trendDates, slice.bu),
+        cachedDailyKpiSeries(dowDates, slice.bu),
+        cachedFunnel(period.current, slice.bu),
+        cachedCancellationSeries(slice.bu, "week", 52),
+        cachedCancellationSeries(slice.bu, "month", 48),
+      ]);
+      const safeRatio = (n: number, d: number) => (d > 0 ? n / d : 0);
+      const sparks = {
+        spend: sparkRows.map((r) => r.spend),
+        leads: sparkRows.map((r) => r.leads),
+        booked: sparkRows.map((r) => r.bookedJobs),
+        sold: sparkRows.map((r) => r.soldJobs),
+        sales: sparkRows.map((r) => r.sales),
+        spendOnRevenue: sparkRows.map((r) => safeRatio(r.spend, r.revenue)),
+        costPerLead: sparkRows.map((r) => safeRatio(r.spend, r.leads)),
+        costPerBookedJob: sparkRows.map((r) =>
+          safeRatio(r.spend, r.bookedJobs),
+        ),
+        ctr: sparkRows.map((r) => safeRatio(r.linkClicks, r.impressions)),
+        leadRate: sparkRows.map((r) => safeRatio(r.leads, r.linkClicks)),
+        bookRate: sparkRows.map((r) => safeRatio(r.bookedJobs, r.leads)),
+        showRate: sparkRows.map((r) =>
+          safeRatio(r.completedJobs, r.bookedJobs),
+        ),
+        closeRate: sparkRows.map((r) => safeRatio(r.soldJobs, r.bookedJobs)),
+        cancellationRate: sparkRows.map((r) =>
+          safeRatio(r.cancelledJobs, r.bookedJobs),
+        ),
+      };
+      return {
+        slice,
+        current,
+        previous,
+        sparks,
+        pivotValues,
+        trend,
+        dowSeries,
+        funnel,
+        weeklyAll,
+        monthlyAll,
+      };
+    }),
+  );
 
   return (
     <main className="flex flex-1 flex-col">
