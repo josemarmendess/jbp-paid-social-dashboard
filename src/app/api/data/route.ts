@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
 import { fetchPaidSocialData } from "@/lib/fetchData";
 
-export const revalidate = 300;
-
 export async function GET() {
   try {
     const data = await fetchPaidSocialData();

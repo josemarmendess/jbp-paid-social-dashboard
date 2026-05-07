@@ -22,8 +22,6 @@ import {
 import { formatInt } from "@/lib/format";
 import type { PaidSocialPayload } from "@/lib/types";
 
-export const revalidate = 300;
-
 interface PageProps {
   searchParams: Promise<{
     range?: string;

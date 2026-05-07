@@ -43,8 +43,6 @@ import {
 import { goalChip, parseGoalTargets } from "@/lib/goals";
 import type { PaidSocialPayload } from "@/lib/types";
 
-export const revalidate = 300;
-
 interface PageProps {
   searchParams: Promise<{
     range?: string;
