@@ -307,12 +307,21 @@ interface PivotCustomizeProps {
   columns: { key: string; label: string }[];
   visibleRowKeys: string[];
   visibleColKeys: string[];
+  /**
+   * When provided, customize changes are emitted via callbacks instead of
+   * pushed to the URL. Used by OverviewClient to keep changes purely
+   * client-side. Both must be set together; omit both for URL-driven pages.
+   */
+  onChangeRows?: (next: string[]) => void;
+  onChangeCols?: (next: string[]) => void;
 }
 
 export function PivotCustomize({
   columns,
   visibleRowKeys,
   visibleColKeys,
+  onChangeRows,
+  onChangeCols,
 }: PivotCustomizeProps) {
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -366,12 +375,14 @@ export function PivotCustomize({
               paramName="pivotRows"
               options={PIVOT_ROWS.map((r) => ({ key: r.key, label: r.label }))}
               value={visibleRowKeys}
+              onChange={onChangeRows}
             />
             <CustomizeColumn
               title={`Columns · ${visibleColKeys.length}/${columns.length}`}
               paramName="pivotCols"
               options={columns}
               value={visibleColKeys}
+              onChange={onChangeCols}
             />
           </div>
           <div className="border-t border-[color:var(--color-border-subtle)] bg-[color:var(--color-jbp-cream)]/40 px-3 py-2 text-[11px] text-[color:var(--color-text-secondary)]">
@@ -388,6 +399,8 @@ interface CustomizeColumnProps {
   paramName: "pivotRows" | "pivotCols";
   options: { key: string; label: string }[];
   value: string[];
+  /** When set, emit changes via callback instead of pushing to URL. */
+  onChange?: (next: string[]) => void;
 }
 
 function CustomizeColumn({
@@ -395,6 +408,7 @@ function CustomizeColumn({
   paramName,
   options,
   value,
+  onChange,
 }: CustomizeColumnProps) {
   const router = useRouter();
   const pathname = usePathname() ?? "/";
@@ -403,6 +417,10 @@ function CustomizeColumn({
   const allOn = options.every((o) => checked(o.key));
 
   function applyNext(next: string[]) {
+    if (onChange) {
+      onChange(next);
+      return;
+    }
     const sp = new URLSearchParams(params?.toString() ?? "");
     if (next.length === 0) {
       // Empty selection = special "show none" — we encode as "_" so the

@@ -20,6 +20,12 @@ interface BusinessUnitFilterProps {
   options: string[];
   /** Current selection from URL `bu` param. Empty array = "All services". */
   value: string[];
+  /**
+   * When provided, the picker is controlled by the parent: changes are emitted
+   * via this callback instead of pushed to the URL. Used by OverviewClient to
+   * keep filter changes purely client-side. Omit for URL-driven pages.
+   */
+  onChange?: (next: string[]) => void;
 }
 
 /**
@@ -29,7 +35,11 @@ interface BusinessUnitFilterProps {
  * keeps multi-select interactions snappy even when the backend fetch is
  * slow.
  */
-export function BusinessUnitFilter({ options, value }: BusinessUnitFilterProps) {
+export function BusinessUnitFilter({
+  options,
+  value,
+  onChange,
+}: BusinessUnitFilterProps) {
   const router = useRouter();
   const params = useSearchParams();
   const pathname = usePathname() ?? "/";
@@ -47,13 +57,17 @@ export function BusinessUnitFilter({ options, value }: BusinessUnitFilterProps) 
 
   const apply = useCallback(
     (next: string[]) => {
-      const sp = new URLSearchParams(params?.toString() ?? "");
       const cleaned = parseBuList(serializeBuList(next), options);
-      // Only push when the value actually differs from the URL state.
+      // Only emit when the value actually differs.
       const sameAsValue =
         cleaned.length === value.length &&
         cleaned.every((s) => value.includes(s));
       if (sameAsValue) return;
+      if (onChange) {
+        onChange(cleaned);
+        return;
+      }
+      const sp = new URLSearchParams(params?.toString() ?? "");
       if (cleaned.length === 0) sp.delete("bu");
       else sp.set("bu", serializeBuList(cleaned));
       const query = sp.toString();
@@ -63,7 +77,7 @@ export function BusinessUnitFilter({ options, value }: BusinessUnitFilterProps) 
         });
       });
     },
-    [params, options, value, pathname, router],
+    [params, options, value, pathname, router, onChange],
   );
 
   // Close on outside click — apply pending changes on the way out.

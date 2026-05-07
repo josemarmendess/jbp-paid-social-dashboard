@@ -8,6 +8,12 @@ import type { ServiceView } from "@/lib/buFilter";
 
 interface ServiceViewToggleProps {
   view: ServiceView;
+  /**
+   * When provided, the toggle is controlled by the parent: changes are emitted
+   * via this callback instead of pushed to the URL. Used by OverviewClient to
+   * keep filter changes purely client-side. Omit for URL-driven pages.
+   */
+  onChange?: (next: ServiceView) => void;
 }
 
 const OPTIONS: ReadonlyArray<{
@@ -41,7 +47,7 @@ const OPTIONS: ReadonlyArray<{
  * visualization: combined (single rollup), split (one per service), all
  * (per service + combined total — best for Slack-pasted reports).
  */
-export function ServiceViewToggle({ view }: ServiceViewToggleProps) {
+export function ServiceViewToggle({ view, onChange }: ServiceViewToggleProps) {
   const router = useRouter();
   const params = useSearchParams();
   const pathname = usePathname() ?? "/";
@@ -49,6 +55,10 @@ export function ServiceViewToggle({ view }: ServiceViewToggleProps) {
 
   function setView(next: ServiceView) {
     if (next === view) return;
+    if (onChange) {
+      onChange(next);
+      return;
+    }
     const sp = new URLSearchParams(params?.toString() ?? "");
     if (next === "combined") sp.delete("view");
     else sp.set("view", next);

@@ -20,12 +20,24 @@ interface DateRangePickerProps {
   initial: DateRangePreset;
   customStart?: string;
   customEnd?: string;
+  /**
+   * When provided, the picker becomes controlled by the parent: it skips
+   * router.replace and just emits the new selection. Used by OverviewClient
+   * to keep filter changes purely client-side (no RSC roundtrip).
+   * When omitted, falls back to the URL-driven behavior used by other pages.
+   */
+  onChange?: (next: {
+    preset: DateRangePreset;
+    start?: string;
+    end?: string;
+  }) => void;
 }
 
 export function DateRangePicker({
   initial,
   customStart,
   customEnd,
+  onChange,
 }: DateRangePickerProps) {
   const router = useRouter();
   const params = useSearchParams();
@@ -39,8 +51,30 @@ export function DateRangePicker({
     });
   }
 
+  function emitOrPush(
+    preset: DateRangePreset,
+    start: string | undefined,
+    end: string | undefined,
+    sp?: URLSearchParams,
+  ) {
+    if (onChange) {
+      onChange({ preset, start, end });
+      return;
+    }
+    if (sp) pushQuery(sp);
+  }
+
   function onPresetChange(next: string | null) {
     const preset = parsePreset(next ?? undefined);
+    if (onChange) {
+      if (preset === "custom") {
+        const today = chicagoTodayStr();
+        emitOrPush(preset, customStart ?? today, customEnd ?? today);
+      } else {
+        emitOrPush(preset, undefined, undefined);
+      }
+      return;
+    }
     const sp = new URLSearchParams(params?.toString() ?? "");
     if (preset === "this_month") sp.delete("range");
     else sp.set("range", preset);
@@ -57,6 +91,10 @@ export function DateRangePicker({
   }
 
   function onStartChange(v: string) {
+    if (onChange) {
+      emitOrPush("custom", v, customEnd ?? v);
+      return;
+    }
     const sp = new URLSearchParams(params?.toString() ?? "");
     sp.set("range", "custom");
     sp.set("start", v);
@@ -65,6 +103,10 @@ export function DateRangePicker({
   }
 
   function onEndChange(v: string) {
+    if (onChange) {
+      emitOrPush("custom", customStart ?? v, v);
+      return;
+    }
     const sp = new URLSearchParams(params?.toString() ?? "");
     sp.set("range", "custom");
     sp.set("end", v);
