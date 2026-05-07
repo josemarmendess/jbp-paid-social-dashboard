@@ -1,7 +1,5 @@
-import { ErrorBanner } from "@/components/ErrorBanner";
 import { OverviewClient } from "@/components/OverviewClient";
-import { fetchPaidSocialData } from "@/lib/fetchData";
-import { listBusinessUnits } from "@/lib/aggregate";
+import { CANONICAL_SERVICES } from "@/lib/serviceTaxonomy";
 import { parsePreset } from "@/lib/dateRange";
 import { parseBuList, parseView } from "@/lib/buFilter";
 import { parseGoalTargets } from "@/lib/goals";
@@ -10,7 +8,6 @@ import {
   parsePivotRowKeys,
 } from "@/lib/pivotConfig";
 import { getPivotPeriods } from "@/lib/periods";
-import type { PaidSocialPayload } from "@/lib/types";
 
 interface PageProps {
   searchParams: Promise<{
@@ -28,37 +25,13 @@ interface PageProps {
 }
 
 /**
- * Overview is a thin server shell now: fetch the payload once (the fetch is
- * cached via "use cache" + Vercel Data Cache) and parse the URL into seed
- * state. From there OverviewClient takes over — every filter change is a
- * pure React re-render against in-memory data, no server round-trip.
- *
- * Other pages still use the URL-driven pattern; they didn't move to client
- * filtering yet because the bottleneck pain was concentrated here.
+ * Thin server shell — the layout already loaded the Apps Script payload
+ * into the PaidSocialDataProvider context. Here we just parse the URL
+ * params into the client component's seed state.
  */
 export default async function Page({ searchParams }: PageProps) {
   const sp = await searchParams;
-
-  let data: PaidSocialPayload | null = null;
-  let fetchError: string | null = null;
-  try {
-    data = await fetchPaidSocialData();
-  } catch (err) {
-    fetchError = err instanceof Error ? err.message : "Unknown error";
-  }
-
-  if (!data) {
-    return (
-      <main className="flex flex-1 flex-col">
-        <ErrorBanner message={fetchError ?? "Try refreshing."} />
-        <div className="flex flex-1 items-center justify-center px-6 py-16 text-sm text-[color:var(--color-text-tertiary)]">
-          No data available.
-        </div>
-      </main>
-    );
-  }
-
-  const businessUnits = listBusinessUnits(data.servicetitan_social_leads);
+  const businessUnits = [...CANONICAL_SERVICES];
   const pivotPeriods = getPivotPeriods();
 
   const initialState = {
@@ -77,7 +50,6 @@ export default async function Page({ searchParams }: PageProps) {
 
   return (
     <OverviewClient
-      data={data}
       businessUnits={businessUnits}
       initialState={initialState}
     />

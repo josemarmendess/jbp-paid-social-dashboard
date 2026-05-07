@@ -2,17 +2,15 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { AnomalyBanner } from "@/components/AnomalyBanner";
-import { BusinessUnitFilter } from "@/components/BusinessUnitFilter";
 import { CancellationRateChart } from "@/components/CancellationRateChart";
+import { ClientPageHeader } from "@/components/ClientPageHeader";
 import { DailyTrendChart } from "@/components/DailyTrendChart";
-import { DateRangePicker } from "@/components/DateRangePicker";
 import { DayOfWeekChart } from "@/components/DayOfWeekChart";
-import { FreshnessIndicator } from "@/components/FreshnessIndicator";
+import { ErrorBanner } from "@/components/ErrorBanner";
 import { FunnelChart } from "@/components/FunnelChart";
 import { KpiCard } from "@/components/KpiCard";
+import { usePaidSocialData } from "@/components/PaidSocialDataProvider";
 import { PivotCustomize, PivotTable } from "@/components/PivotTable";
-import { RefreshButton } from "@/components/RefreshButton";
-import { ServiceViewToggle } from "@/components/ServiceViewToggle";
 import {
   cancellationRateSeries,
   computeFunnel,
@@ -22,12 +20,8 @@ import {
   dailySpendVsRevenue,
   detectAnomalies,
 } from "@/lib/aggregate";
-import {
-  buListLabel,
-  getServiceSlices,
-  serializeBuList,
-  type ServiceView,
-} from "@/lib/buFilter";
+import { getServiceSlices, type ServiceView } from "@/lib/buFilter";
+import { appendCommonFilters, replaceQuery } from "@/lib/clientUrlState";
 import { getPeriod } from "@/lib/dateRange";
 import {
   formatCurrency,
@@ -43,10 +37,9 @@ import {
 } from "@/lib/periods";
 import { ALL_PIVOT_ROW_KEYS, DEFAULT_PIVOT_ROW_KEYS } from "@/lib/pivotConfig";
 import { toneForLabel } from "@/lib/sliceColors";
-import type { DateRangePreset, PaidSocialPayload } from "@/lib/types";
+import type { DateRangePreset } from "@/lib/types";
 
 interface OverviewClientProps {
-  data: PaidSocialPayload;
   /** Canonical service taxonomy — passed in to avoid re-deriving on the client. */
   businessUnits: string[];
   /** State derived from the URL's searchParams on first render. */
@@ -74,10 +67,10 @@ interface OverviewClientProps {
  * stable until the user clicks Refresh.
  */
 export function OverviewClient({
-  data,
   businessUnits,
   initialState,
 }: OverviewClientProps) {
+  const { data, error } = usePaidSocialData();
   const [preset, setPreset] = useState<DateRangePreset>(initialState.preset);
   const [customStart, setCustomStart] = useState<string | undefined>(
     initialState.customStart,
@@ -99,13 +92,7 @@ export function OverviewClient({
   // RSC fetch and no server-side re-render. Shareable links still work.
   useEffect(() => {
     const sp = new URLSearchParams();
-    if (preset !== "this_month") sp.set("range", preset);
-    if (preset === "custom") {
-      if (customStart) sp.set("start", customStart);
-      if (customEnd) sp.set("end", customEnd);
-    }
-    if (bu.length > 0) sp.set("bu", serializeBuList(bu));
-    if (view !== "combined") sp.set("view", view);
+    appendCommonFilters(sp, { preset, customStart, customEnd, bu, view });
     if (
       pivotRowKeys.length === 0 ||
       (pivotRowKeys.length !== ALL_PIVOT_ROW_KEYS.length &&
@@ -132,11 +119,7 @@ export function OverviewClient({
       sp.set("roasTarget", String(targets.roasTarget));
     if (targets.cancelTarget != null)
       sp.set("cancelTarget", String(targets.cancelTarget));
-    const qs = sp.toString();
-    const next = qs ? `${window.location.pathname}?${qs}` : window.location.pathname;
-    if (next !== window.location.pathname + window.location.search) {
-      window.history.replaceState(null, "", next);
-    }
+    replaceQuery(sp.toString());
   }, [
     preset,
     customStart,
@@ -165,6 +148,7 @@ export function OverviewClient({
   const pivotPeriods = useMemo(() => getPivotPeriods(), []);
 
   const anomalies = useMemo(() => {
+    if (!data) return [];
     const rows = dailyKpiSeries(
       data.meta_insights,
       data.servicetitan_social_leads,
@@ -175,6 +159,7 @@ export function OverviewClient({
   }, [data, sparkDates30]);
 
   const sliceData = useMemo(() => {
+    if (!data) return [];
     return slices.map((slice) => {
       const current = computeOverviewKpis(
         data.meta_insights,
@@ -278,55 +263,37 @@ export function OverviewClient({
     pivotPeriods,
   ]);
 
-  const filterActive = bu.length > 0;
+  if (!data) {
+    return (
+      <main className="flex flex-1 flex-col">
+        <ErrorBanner message={error ?? "Try refreshing."} />
+        <div className="flex flex-1 items-center justify-center px-6 py-16 text-sm text-[color:var(--color-text-tertiary)]">
+          No data available.
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="flex flex-1 flex-col">
-      {/* Sticky header — same layout as the global TopHeader, but every filter
-          mutates local state instead of pushing the URL. */}
-      <header className="sticky top-0 z-20 flex h-auto flex-col gap-3 border-b border-[color:var(--color-border-subtle)] bg-[color:var(--color-jbp-cream)]/95 px-6 py-3 backdrop-blur-sm sm:h-16 sm:flex-row sm:items-center sm:gap-6 sm:py-0">
-        <div className="flex min-w-0 flex-col">
-          <span className="text-[11px] uppercase tracking-[0.08em] text-[color:var(--color-text-tertiary)]">
-            Dashboard
-          </span>
-          <div className="flex items-baseline gap-2">
-            <h1
-              className="font-display text-[color:var(--color-text-primary)]"
-              style={{ fontSize: 22, lineHeight: 1.1 }}
-            >
-              Overview
-            </h1>
-            {filterActive ? (
-              <span className="inline-flex items-center rounded-full border border-[color:var(--color-jbp-blue)]/30 bg-[color:var(--color-jbp-blue)]/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--color-jbp-blue)]">
-                {buListLabel(bu)}
-              </span>
-            ) : null}
-          </div>
-        </div>
-
-        <div className="flex min-w-0 flex-1" />
-
-        <div className="flex flex-wrap items-center gap-2">
-          <FreshnessIndicator generatedAt={data.generated_at} />
-          <DateRangePicker
-            initial={preset}
-            customStart={preset === "custom" ? customStart : undefined}
-            customEnd={preset === "custom" ? customEnd : undefined}
-            onChange={({ preset: nextPreset, start, end }) => {
-              setPreset(nextPreset);
-              setCustomStart(start);
-              setCustomEnd(end);
-            }}
-          />
-          <BusinessUnitFilter
-            options={businessUnits}
-            value={bu}
-            onChange={setBu}
-          />
-          <ServiceViewToggle view={view} onChange={setView} />
-          <RefreshButton />
-        </div>
-      </header>
+      <ClientPageHeader
+        breadcrumb="Dashboard"
+        pageTitle="Overview"
+        generatedAt={data.generated_at}
+        preset={preset}
+        customStart={customStart}
+        customEnd={customEnd}
+        onDateChange={({ preset: nextPreset, start, end }) => {
+          setPreset(nextPreset);
+          setCustomStart(start);
+          setCustomEnd(end);
+        }}
+        businessUnits={businessUnits}
+        bu={bu}
+        onBuChange={setBu}
+        view={view}
+        onViewChange={setView}
+      />
 
       <div className="mx-auto flex w-full max-w-[1320px] flex-1 flex-col gap-8 px-6 py-6 sm:px-8">
         <div className="flex items-baseline justify-between">
