@@ -5,18 +5,25 @@ import type { PaidSocialPayload } from "./types";
 /**
  * Cached entry point for the Apps Script payload.
  *
- * - "use cache" wraps the whole function so identical calls during the
- *   cacheLife window resolve instantly from Next's runtime cache without
- *   re-hitting Apps Script (or even re-parsing the JSON).
- * - cacheTag("paid-social") ties this to the same tag the Refresh button's
- *   server action invalidates via updateTag, keeping the manual-refresh UX.
- * - revalidate: 1800s matches the previous fetch-level revalidate.
- *   expire: 3600s is the hard ceiling — after an hour without traffic, the
- *   next request regenerates synchronously instead of returning very stale.
+ * Two cache layers, on purpose:
  *
- * Note: the function takes no arguments, so the cache key is just (build id,
- * function id). Per-(range, bu, view) caching happens one layer up, in
- * cachedAggregate.ts, which calls this and then computes view-scoped numbers.
+ *   1. fetch's `next: { revalidate, tags }` puts the raw HTTP response in
+ *      Vercel's Data Cache. This is the layer that PERSISTS ACROSS REQUESTS
+ *      AND INSTANCES — without it, every cold serverless invocation would
+ *      re-call Apps Script. (Round-trip Apps Script is the dominant cost.)
+ *
+ *   2. "use cache" wraps the whole function so within a single hot instance
+ *      we also skip JSON parsing (the parsed object is cached, not just the
+ *      raw bytes). This is in-memory only on serverless, so its benefit is
+ *      limited to Fluid Compute concurrency reuse — but it's free and stacks
+ *      cleanly on top of the Data Cache.
+ *
+ * Both layers are tagged "paid-social" so the Refresh button's
+ * updateTag("paid-social") invalidates them together.
+ *
+ * Earlier I dropped the fetch's next:{} when adding "use cache". That broke
+ * cross-request caching on Vercel — the freshness indicator updated on every
+ * filter change because each render re-hit Apps Script. Restored now.
  */
 export async function fetchPaidSocialData(): Promise<PaidSocialPayload> {
   "use cache";
@@ -35,6 +42,7 @@ export async function fetchPaidSocialData(): Promise<PaidSocialPayload> {
 
   const t0 = Date.now();
   const res = await fetch(url.toString(), {
+    next: { revalidate: 1800, tags: ["paid-social"] },
     redirect: "follow",
   });
   const fetchMs = Date.now() - t0;
@@ -52,8 +60,9 @@ export async function fetchPaidSocialData(): Promise<PaidSocialPayload> {
   const json = (await res.json()) as PaidSocialPayload;
   const parseMs = Date.now() - t1;
 
-  // Only logged on cache MISS now (the "use cache" wrapper makes hits silent).
-  // Use that signal in `vercel logs` to see how often Apps Script is hit.
+  // Logged whenever the function body actually executes. With both cache
+  // layers warm this should be silent in `vercel logs` — every line means
+  // a cache miss somewhere.
   console.log(
     `[paid-social] MISS · fetch ${fetchMs}ms · parse ${parseMs}ms · meta_rows=${json.meta_insights?.length ?? 0} st_rows=${json.servicetitan_social_leads?.length ?? 0}`,
   );
