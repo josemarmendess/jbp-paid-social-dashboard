@@ -370,6 +370,30 @@ function HistorySlice({
   );
 }
 
+/**
+ * "2026-04" → "Apr". When the visible window crosses a year boundary
+ * (Jan or first row of a new year), append "'YY" so it reads "Jan '27".
+ */
+const MONTH_NAMES = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+function formatMonthLabel(
+  month: string,
+  i: number,
+  rows: MonthlyKpiRow[],
+): string {
+  const m = /^(\d{4})-(\d{2})$/.exec(month);
+  if (!m) return month;
+  const year = Number(m[1]);
+  const mo = Number(m[2]);
+  const name = MONTH_NAMES[mo - 1] ?? month;
+  const prevYear =
+    i > 0 ? Number(rows[i - 1].month.slice(0, 4)) : year;
+  const showYear = i === 0 || year !== prevYear;
+  return showYear ? `${name} '${String(year).slice(2)}` : name;
+}
+
 const cellRight = {
   padding: "12px 14px",
   textAlign: "right" as const,
@@ -409,7 +433,12 @@ function HistoryBars({
   const validRatios = ratios.filter((v): v is number => v != null);
   const maxRatio = Math.max(100, ...validRatios) * 1.1;
   const stepX = innerW / rows.length;
-  const barW = (stepX - 8) / 2;
+  // Tighter bar pair, wider between-month gap. Each month consumes
+  // stepX of horizontal space; the bar pair takes ~50% of that, leaving
+  // ~25% of stepX as breathing room on each side so each month reads as
+  // its own group.
+  const groupW = stepX * 0.5;
+  const barW = (groupW - 4) / 2;
   const barTicks = [0, maxBar * 0.25, maxBar * 0.5, maxBar * 0.75, maxBar];
   const ratioTicks = [0, maxRatio * 0.5, maxRatio];
 
@@ -497,9 +526,11 @@ function HistoryBars({
       })}
       {/* Bars */}
       {rows.map((d, i) => {
-        const groupX = padL + i * stepX + 4;
+        // Center the bar pair within the month's slot.
+        const groupX = padL + i * stepX + (stepX - groupW) / 2;
         const sH = (d.spend / maxBar) * innerH;
         const rH = (d.sales / maxBar) * innerH;
+        const monthLabel = formatMonthLabel(d.month, i, rows);
         return (
           <g key={d.month}>
             <rect
@@ -510,30 +541,27 @@ function HistoryBars({
               fill="var(--color-jbp-red)"
               fillOpacity="0.85"
             >
-              <title>
-                Spend {formatCompactMoney(d.spend)}
-              </title>
+              <title>Spend {formatCompactMoney(d.spend)}</title>
             </rect>
             <rect
-              x={groupX + barW + 2}
+              x={groupX + barW + 4}
               y={padT + innerH - rH}
               width={barW}
               height={rH}
               fill="var(--color-jbp-navy)"
             >
-              <title>
-                Revenue {formatCompactMoney(d.sales)}
-              </title>
+              <title>Revenue {formatCompactMoney(d.sales)}</title>
             </rect>
             <text
-              x={groupX + barW + 1}
+              x={padL + i * stepX + stepX / 2}
               y={h - 14}
               fontSize="10"
               fill="var(--color-jbp-text-3)"
               textAnchor="middle"
               fontFamily="var(--font-mono)"
+              style={{ textTransform: "uppercase", letterSpacing: 0.5 }}
             >
-              {d.month.slice(2)}
+              {monthLabel}
             </text>
           </g>
         );

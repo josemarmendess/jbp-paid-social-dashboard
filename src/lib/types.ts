@@ -80,12 +80,11 @@ export type DateRangePreset =
  * window. Drives every delta and side-by-side comparison.
  *
  *  - prior_period (default): the immediately preceding window of equal length
- *    (e.g. last 30 days → the 30 days before that)
- *  - prior_month:           the equivalent calendar offset one month back
- *    (e.g. May 1-15 → April 1-15; "this month" → same days last month)
- *  - prior_year:            the equivalent dates last year
+ *    (e.g. May 1-7 → April 24-30; last 30 days → the 30 days before that)
+ *  - prior_month:            the same dates one calendar month back
+ *    (e.g. May 1-7 → April 1-7)
  */
-export type ComparisonMode = "prior_period" | "prior_month" | "prior_year";
+export type ComparisonMode = "prior_period" | "prior_month";
 
 export interface DateRange {
   startStr: string;

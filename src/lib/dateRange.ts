@@ -1,7 +1,6 @@
 import {
   startOfMonth,
   subMonths,
-  subYears,
   endOfMonth,
   setDate,
   subDays,
@@ -106,14 +105,13 @@ export function chicagoTodayStr(): string {
  * crashes on a bad URL.
  */
 export function parseComparison(raw: string | undefined): ComparisonMode {
-  if (raw === "prior_month" || raw === "prior_year") return raw;
+  if (raw === "prior_month") return "prior_month";
   return "prior_period";
 }
 
 const COMPARISON_LABELS: Record<ComparisonMode, string> = {
   prior_period: "Prior period",
-  prior_month: "Prior month",
-  prior_year: "Prior year",
+  prior_month: "Same dates last month",
 };
 
 export const COMPARISON_OPTIONS: ReadonlyArray<{
@@ -122,42 +120,31 @@ export const COMPARISON_OPTIONS: ReadonlyArray<{
 }> = [
   { value: "prior_period", label: COMPARISON_LABELS.prior_period },
   { value: "prior_month", label: COMPARISON_LABELS.prior_month },
-  { value: "prior_year", label: COMPARISON_LABELS.prior_year },
 ];
 
 /**
- * Apply a ComparisonMode to a (current) range — returns the previous range
- * for delta computations. "prior_period" is the default getPeriod behavior;
- * "prior_month" and "prior_year" shift the same start/end dates by 1 month
- * or 1 year.
+ * Apply a ComparisonMode to a (current) range — returns the previous range.
+ * Always overrides the preset's default previous range so the toggle has a
+ * visible effect on every preset, including this_month (whose default used
+ * to coincide with prior_month).
  */
 function applyComparison(
   current: { startStr: string; endStr: string },
   mode: ComparisonMode,
 ): { startStr: string; endStr: string } {
-  if (mode === "prior_period") {
-    const startD = parseISO(current.startStr);
-    const endD = parseISO(current.endStr);
-    const days = differenceInCalendarDays(endD, startD) + 1;
-    const prevEnd = subDays(startD, 1);
-    const prevStart = subDays(prevEnd, days - 1);
-    return { startStr: ymd(prevStart), endStr: ymd(prevEnd) };
-  }
+  const startD = parseISO(current.startStr);
+  const endD = parseISO(current.endStr);
   if (mode === "prior_month") {
-    const startD = parseISO(current.startStr);
-    const endD = parseISO(current.endStr);
     return {
       startStr: ymd(subMonths(startD, 1)),
       endStr: ymd(subMonths(endD, 1)),
     };
   }
-  // prior_year
-  const startD = parseISO(current.startStr);
-  const endD = parseISO(current.endStr);
-  return {
-    startStr: ymd(subYears(startD, 1)),
-    endStr: ymd(subYears(endD, 1)),
-  };
+  // prior_period — sequential window of equal length immediately before.
+  const days = differenceInCalendarDays(endD, startD) + 1;
+  const prevEnd = subDays(startD, 1);
+  const prevStart = subDays(prevEnd, days - 1);
+  return { startStr: ymd(prevStart), endStr: ymd(prevEnd) };
 }
 
 export function getPeriod(
@@ -167,8 +154,8 @@ export function getPeriod(
   comparison: ComparisonMode = "prior_period",
 ): PeriodPair {
   const base = getPeriodBase(preset, customStart, customEnd);
-  if (comparison === "prior_period") return base;
-  // Override the previous range to follow the requested comparison mode.
+  // Always recompute the previous range from the chosen comparison so the
+  // toggle visibly switches between sequential vs same-dates-last-month.
   const previous = applyComparison(base.current, comparison);
   return {
     ...base,
@@ -176,7 +163,7 @@ export function getPeriod(
     previousLabel:
       comparison === "prior_month"
         ? "vs. same days last month"
-        : "vs. same days last year",
+        : "vs. previous period",
   };
 }
 

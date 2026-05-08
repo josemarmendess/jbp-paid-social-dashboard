@@ -18,33 +18,38 @@ import type { ZipMetrics } from "@/lib/aggregate";
 import { formatCurrency, formatInt } from "@/lib/format";
 import { Tooltip } from "@/components/Tooltip";
 
-type MetricKey = "cpl" | "cpBooked" | "sales" | "spendOnRevenue" | "soldCount";
+// Map metrics intentionally come ONLY from ServiceTitan rows (leads,
+// booked, sales). The earlier CPL / Cost-per-Booked / Spend-on-Revenue
+// options used Meta spend pro-rated by lead share — that produced
+// identical "per-zip" numbers across every zip and was misleading.
+type MetricKey = "leads" | "sales" | "booked";
 
 interface MetricDef {
   key: MetricKey;
   label: string;
   pick: (z: ZipMetrics) => number | null;
   highIsBad: boolean;
+  /** Approximate flag kept on the type for the gradient + tooltip helper. */
   approximate: boolean;
   format: (v: number) => string;
 }
 
 const METRICS: ReadonlyArray<MetricDef> = [
   {
-    key: "cpl",
-    label: "CPL",
-    pick: (z) => (z.leads > 0 ? z.allocatedSpend / z.leads : null),
-    highIsBad: true,
-    approximate: true,
-    format: (v) => formatCurrency(v, true),
+    key: "leads",
+    label: "Leads",
+    pick: (z) => (z.leads > 0 ? z.leads : null),
+    highIsBad: false,
+    approximate: false,
+    format: (v) => formatInt(v),
   },
   {
-    key: "cpBooked",
-    label: "Cost / Booked",
-    pick: (z) => (z.bookedJobs > 0 ? z.allocatedSpend / z.bookedJobs : null),
-    highIsBad: true,
-    approximate: true,
-    format: (v) => formatCurrency(v, true),
+    key: "booked",
+    label: "Booked Jobs",
+    pick: (z) => (z.bookedJobs > 0 ? z.bookedJobs : null),
+    highIsBad: false,
+    approximate: false,
+    format: (v) => formatInt(v),
   },
   {
     key: "sales",
@@ -53,22 +58,6 @@ const METRICS: ReadonlyArray<MetricDef> = [
     highIsBad: false,
     approximate: false,
     format: (v) => formatCurrency(v),
-  },
-  {
-    key: "spendOnRevenue",
-    label: "Spend on Revenue",
-    pick: (z) => (z.sales > 0 ? (z.allocatedSpend / z.sales) * 100 : null),
-    highIsBad: true,
-    approximate: true,
-    format: (v) => `${Math.round(v)}%`,
-  },
-  {
-    key: "soldCount",
-    label: "Sold Count",
-    pick: (z) => (z.bookedJobs > 0 ? z.bookedJobs : null), // bookedJobs == sold count for ST social leads dataset
-    highIsBad: false,
-    approximate: false,
-    format: (v) => formatInt(v),
   },
 ];
 
@@ -90,7 +79,7 @@ interface GeographicMapInnerProps {
  * them; the bottom table is a full sortable list.
  */
 export function GeographicMapInner({ rows }: GeographicMapInnerProps) {
-  const [metricKey, setMetricKey] = useState<MetricKey>("sales");
+  const [metricKey, setMetricKey] = useState<MetricKey>("leads");
   const metric = METRICS.find((m) => m.key === metricKey)!;
 
   const placed: PlacedZip[] = useMemo(
@@ -190,18 +179,8 @@ export function GeographicMapInner({ rows }: GeographicMapInnerProps) {
             </button>
           ))}
         </div>
-        {metric.approximate ? (
-          <span className="inline-flex items-center gap-1 text-[11px] text-[color:var(--color-text-secondary)]">
-            <Tooltip content="Meta spend isn't tagged with zip codes. Spend is distributed across zips proportionally to leads, so per-zip CPL / Cost per Booked / Spend on Revenue are approximations.">
-              <Info
-                className="h-3.5 w-3.5 text-zinc-400"
-                aria-label="About this metric"
-                tabIndex={0}
-              />
-            </Tooltip>
-            Spend allocated by lead share — approximation
-          </span>
-        ) : null}
+        {/* Map metrics now come only from ServiceTitan rows — no
+            spend-derived approximations. */}
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_320px]">
@@ -229,9 +208,6 @@ export function GeographicMapInner({ rows }: GeographicMapInnerProps) {
               const radius = 6 + (p.leads / maxLeads) * 26;
               const color = colorFor(p);
               const isActive = highlightZip === p.zip;
-              const cpl = p.leads > 0 ? p.allocatedSpend / p.leads : null;
-              const cpb =
-                p.bookedJobs > 0 ? p.allocatedSpend / p.bookedJobs : null;
               return (
                 <CircleMarker
                   key={p.zip}
@@ -269,32 +245,6 @@ export function GeographicMapInner({ rows }: GeographicMapInnerProps) {
                             <td className="pr-3 text-zinc-500">Sales</td>
                             <td className="text-right">
                               {formatCurrency(p.sales)}
-                            </td>
-                          </tr>
-                          <tr>
-                            <td className="pr-3 text-zinc-500">
-                              Allocated spend
-                            </td>
-                            <td className="text-right">
-                              {formatCurrency(p.allocatedSpend, true)}
-                            </td>
-                          </tr>
-                          <tr>
-                            <td className="pr-3 text-zinc-500">CPL</td>
-                            <td className="text-right">
-                              {cpl !== null
-                                ? formatCurrency(cpl, true)
-                                : "—"}
-                            </td>
-                          </tr>
-                          <tr>
-                            <td className="pr-3 text-zinc-500">
-                              Cost / Booked
-                            </td>
-                            <td className="text-right">
-                              {cpb !== null
-                                ? formatCurrency(cpb, true)
-                                : "—"}
                             </td>
                           </tr>
                           <tr>
@@ -385,14 +335,10 @@ interface ZipTableProps {
   onRowClick: (z: PlacedZip) => void;
 }
 
-type SortKey =
-  | "zip"
-  | "leads"
-  | "bookedJobs"
-  | "sales"
-  | "allocatedSpend"
-  | "cpl"
-  | "cpBooked";
+// Sort keys are limited to ServiceTitan-real metrics — Meta-allocated
+// spend / cpl / cost-per-booked were dropped because they end up
+// identical for every zip (spend isn't tagged with a zip).
+type SortKey = "zip" | "leads" | "bookedJobs" | "sales";
 
 function ZipTable({ rows, metric, onRowClick }: ZipTableProps) {
   const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({
@@ -412,14 +358,6 @@ function ZipTable({ rows, metric, onRowClick }: ZipTableProps) {
         return r.bookedJobs;
       case "sales":
         return r.sales;
-      case "allocatedSpend":
-        return r.allocatedSpend;
-      case "cpl":
-        return r.leads > 0 ? r.allocatedSpend / r.leads : Number.POSITIVE_INFINITY;
-      case "cpBooked":
-        return r.bookedJobs > 0
-          ? r.allocatedSpend / r.bookedJobs
-          : Number.POSITIVE_INFINITY;
     }
   };
 
@@ -475,15 +413,6 @@ function ZipTable({ rows, metric, onRowClick }: ZipTableProps) {
               <Th k="sales" sort={sort} onClick={toggle} align="right">
                 Sales
               </Th>
-              <Th k="allocatedSpend" sort={sort} onClick={toggle} align="right">
-                Spend (allocated)
-              </Th>
-              <Th k="cpl" sort={sort} onClick={toggle} align="right">
-                CPL
-              </Th>
-              <Th k="cpBooked" sort={sort} onClick={toggle} align="right">
-                Cost / Booked
-              </Th>
               <th className="px-3 py-2.5 text-left text-[10px] font-semibold uppercase tracking-[0.06em] text-[color:var(--color-text-tertiary)]">
                 Lead share
               </th>
@@ -491,10 +420,6 @@ function ZipTable({ rows, metric, onRowClick }: ZipTableProps) {
           </thead>
           <tbody>
             {pageRows.map((p) => {
-              const cpl =
-                p.leads > 0 ? p.allocatedSpend / p.leads : null;
-              const cpb =
-                p.bookedJobs > 0 ? p.allocatedSpend / p.bookedJobs : null;
               const share = (p.leads / maxLeads) * 100;
               return (
                 <tr
@@ -513,15 +438,6 @@ function ZipTable({ rows, metric, onRowClick }: ZipTableProps) {
                   </td>
                   <td className="px-3 py-2.5 text-right tabular-nums">
                     {formatCurrency(p.sales)}
-                  </td>
-                  <td className="px-3 py-2.5 text-right tabular-nums">
-                    {formatCurrency(p.allocatedSpend, true)}
-                  </td>
-                  <td className="px-3 py-2.5 text-right tabular-nums">
-                    {cpl !== null ? formatCurrency(cpl, true) : "—"}
-                  </td>
-                  <td className="px-3 py-2.5 text-right tabular-nums">
-                    {cpb !== null ? formatCurrency(cpb, true) : "—"}
                   </td>
                   <td className="px-3 py-2.5">
                     <div className="flex items-center gap-2">

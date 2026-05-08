@@ -117,6 +117,11 @@ export function OverviewClient({
   const slices = useMemo(() => getServiceSlices(bu, view), [bu, view]);
   const sparkDates14 = useMemo(() => rollingDaysList(14), []);
   const trendDates30 = useMemo(() => rollingDaysList(30), []);
+  // 60-day window for the MTD-cumulative ratio chart. The chart only
+  // displays the trailing 30 days, but we need the extra lookback so
+  // each visible day's running total starts from the 1st of its
+  // calendar month (not from the start of the chart window).
+  const trendDates60 = useMemo(() => rollingDaysList(60), []);
   const dowDates = useMemo(() => rollingDaysList(30), []);
   // 60-day series so 30/30 anomaly comparisons have enough closed days.
   const anomalyDates60 = useMemo(() => rollingDaysList(61), []);
@@ -170,23 +175,27 @@ export function OverviewClient({
         sparkDates14,
         slice.bu,
       );
-      // 30-day per-day series — drives BOTH the cumulative ratio chart and
-      // the conversion-rate sparks. Pulls .sales (the canonical "Sales
-      // Revenue" the rest of the dashboard uses) instead of the older
-      // dailySpendVsRevenue helper, which used the .Revenue column and
-      // disagreed with the Spend/Revenue KPI by an order of magnitude.
+      // 30-day per-day series — drives the conversion-rate sparks.
+      // Pulls .sales (the canonical "Sales Revenue") not .Revenue.
       const rate30Rows = dailyKpiSeries(
         data.meta_insights,
         data.servicetitan_social_leads,
         trendDates30,
         slice.bu,
       );
-      // Build the MTD-cumulative spend / sales ratio for each day. Resets
-      // at the 1st of every calendar month.
+      // 60-day series for the MTD-cumulative chart. We need the lookback
+      // so a day in the middle of last month accumulates from the 1st of
+      // last month — not from the 1st day of the chart window.
+      const trend60Rows = dailyKpiSeries(
+        data.meta_insights,
+        data.servicetitan_social_leads,
+        trendDates60,
+        slice.bu,
+      );
       let cumSpend = 0;
       let cumSales = 0;
       let lastMonth = "";
-      const trendData: CumulativePoint[] = rate30Rows.map((p) => {
+      const trendDataFull: CumulativePoint[] = trend60Rows.map((p) => {
         const month = p.date.slice(0, 7);
         if (month !== lastMonth) {
           cumSpend = 0;
@@ -201,6 +210,9 @@ export function OverviewClient({
           ratioPct: cumSales > 0 ? (cumSpend / cumSales) * 100 : null,
         };
       });
+      // Display the trailing 30 days; the running totals on those days
+      // are already correct because we walked the full 60-day window.
+      const trendData = trendDataFull.slice(-30);
       const funnel = computeFunnel(
         data.meta_insights,
         data.servicetitan_social_leads,
@@ -272,6 +284,7 @@ export function OverviewClient({
     period,
     sparkDates14,
     trendDates30,
+    trendDates60,
     dowDates,
     cancelWeeks,
   ]);
