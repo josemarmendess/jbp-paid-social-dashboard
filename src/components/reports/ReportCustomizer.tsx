@@ -22,11 +22,13 @@ export function ReportCustomizer({
   onChange,
   onTitleChange,
   onHeroPeriodChange,
+  onSlackDestinationChange,
 }: {
   config: DailySummaryConfig;
   onChange: (next: DailySummaryConfig) => void;
   onTitleChange: (title: string) => void;
   onHeroPeriodChange: (next: DailySummaryPeriod | null) => void;
+  onSlackDestinationChange: (next: string) => void;
 }) {
   const toggleService = (key: string) => {
     const has = config.services.includes(key);
@@ -155,6 +157,30 @@ export function ReportCustomizer({
             </option>
           ))}
         </select>
+      </Section>
+
+      <Section
+        label="Slack destination"
+        hint="Channel ID (Cxxxxxxxx for public, Gxxxxxxxx for private), DM channel (Dxxxxxxxx), or member ID (Uxxxxxxxx — the bot opens a DM). Leave blank to use the SLACK_REVIEW_CHANNEL env var."
+      >
+        <input
+          type="text"
+          value={config.slackDestination ?? ""}
+          onChange={(e) => onSlackDestinationChange(e.currentTarget.value)}
+          placeholder="C0123ABCDEF"
+          spellCheck={false}
+          style={{
+            height: 30,
+            padding: "0 10px",
+            fontSize: 11,
+            fontFamily: "var(--font-mono)",
+            letterSpacing: 0.4,
+            background: "var(--color-jbp-paper)",
+            border: "1px solid var(--color-jbp-hairline)",
+            color: "var(--color-jbp-text)",
+            outline: "none",
+          }}
+        />
       </Section>
 
       <Section label={`Metrics · ${config.metrics.length}/${PIVOT_ROWS.length}`}>

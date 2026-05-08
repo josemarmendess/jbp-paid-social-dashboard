@@ -194,6 +194,8 @@ export function DailySummaryClient({
           template: "daily-summary",
           title: config.title,
           imageDataUrl: dataUrl,
+          // Per-template override; the API falls back to env var when blank.
+          destination: config.slackDestination?.trim() || undefined,
         }),
       });
       const json = (await res.json()) as {
@@ -351,6 +353,9 @@ export function DailySummaryClient({
             onTitleChange={(title) => update({ ...config, title })}
             onHeroPeriodChange={(heroPeriod) =>
               update({ ...config, heroPeriod })
+            }
+            onSlackDestinationChange={(slackDestination) =>
+              update({ ...config, slackDestination })
             }
           />
         </div>

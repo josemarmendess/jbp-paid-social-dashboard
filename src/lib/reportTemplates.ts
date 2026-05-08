@@ -111,6 +111,12 @@ export interface DailySummaryConfig {
    * larger numbers). null = no highlight.
    */
   heroPeriod: DailySummaryPeriod | null;
+  /**
+   * Slack destination for the Send button. Channel ID (`C…` for public,
+   * `G…` for private), DM channel (`D…`), or user ID (`U…`, the bot opens
+   * a DM). Empty string = fall back to the SLACK_REVIEW_CHANNEL env var.
+   */
+  slackDestination?: string;
 }
 
 export const DAILY_SUMMARY_DEFAULT_CONFIG: DailySummaryConfig = {
