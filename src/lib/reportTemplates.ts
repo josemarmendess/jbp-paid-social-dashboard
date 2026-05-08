@@ -21,7 +21,7 @@ export interface ReportTemplate {
 export const REPORT_TEMPLATES: ReadonlyArray<ReportTemplate> = [
   {
     id: "daily-summary",
-    name: "Daily Summary — KPIs per service",
+    name: "Daily Summary | KPIs per service",
     description:
       "The morning-coffee snapshot the team used to copy as PNG. Per-service rollup of the headline KPIs across multiple windows (Today, Yesterday, Last 3/7/30 days, MTD, Last month). Customisable; saves as a PDF, copies to clipboard, or queues for Slack.",
   },
@@ -120,7 +120,7 @@ export interface DailySummaryConfig {
 }
 
 export const DAILY_SUMMARY_DEFAULT_CONFIG: DailySummaryConfig = {
-  title: "Daily Summary — KPIs per service",
+  title: "Daily Summary | KPIs per service",
   services: ["all", ...CANONICAL_SERVICES],
   periods: [
     "today",

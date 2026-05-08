@@ -35,10 +35,17 @@ export function loadDailySummaryConfig(): DailySummaryConfig {
     if (parsed.v !== SCHEMA_VERSION) return DAILY_SUMMARY_DEFAULT_CONFIG;
     // Merge with defaults so a stored config from before we added a field
     // (e.g. heroPeriod) still renders.
-    return {
+    const merged = {
       ...DAILY_SUMMARY_DEFAULT_CONFIG,
       ...parsed.data,
     };
+    // One-shot migration: bump older "Daily Summary — KPIs per service"
+    // titles to the pipe form so the saved config doesn't shadow the new
+    // default. Keeps custom titles untouched.
+    if (merged.title === "Daily Summary — KPIs per service") {
+      merged.title = DAILY_SUMMARY_DEFAULT_CONFIG.title;
+    }
+    return merged;
   } catch {
     return DAILY_SUMMARY_DEFAULT_CONFIG;
   }
