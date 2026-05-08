@@ -52,3 +52,19 @@ export function pctChange(current: number, previous: number): number {
   }
   return (current - previous) / previous;
 }
+
+/** Compact dollar — e.g. $1.2M / $42.5k / $930. Used in hero KPIs and tables. */
+export function formatCompactMoney(n: number): string {
+  if (!Number.isFinite(n)) return "—";
+  if (Math.abs(n) >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+  if (Math.abs(n) >= 1_000) return `$${(n / 1_000).toFixed(1)}k`;
+  return `$${Math.round(n)}`;
+}
+
+/** Compact integer — e.g. 1.2M / 42.5k / 930. */
+export function formatCompactInt(n: number): string {
+  if (!Number.isFinite(n)) return "—";
+  if (Math.abs(n) >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (Math.abs(n) >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return Math.round(n).toString();
+}

@@ -4,50 +4,80 @@
    so any leftover `dark:*` utilities don't fire from OS prefers-color-scheme. */
 @custom-variant dark (&:where([data-jbp-dark="true"] *));
 
-/* JBP Paid Social Dashboard — light mode only.
-   Brand identity: cream surfaces, JBP red & blue for chrome,
-   semantic colors for data viz only. */
+/* JBP Paid Social Dashboard — heritage trade brand. Cream surfaces, sharp
+   corners, hairlines instead of shadows, weight-driven type hierarchy.
+   Tokens here map 1:1 to the design handoff (handoff/tokens.md). */
 
 @theme inline {
   /* Brand */
-  --color-jbp-cream: #f9f3ec;
-  --color-jbp-red: #bc0e0f;
-  --color-jbp-red-hover: #a00b0c;
-  --color-jbp-blue: #1561e6;
-  --color-jbp-blue-hover: #0f4dba;
+  --color-jbp-red: #c41e1e;
+  --color-jbp-red-dark: #a01818;
+  --color-jbp-red-light: #e8c2c2;
 
   /* Surfaces */
-  --color-bg: #f9f3ec;
-  --color-surface-card: #ffffff;
-  --color-surface-elevated: #ffffff;
-  --color-surface-hover: #f4ecdf;
+  --color-jbp-cream: #f4ede0;
+  --color-jbp-paper: #fbf7ec;
+  --color-jbp-white: #ffffff;
+  --color-jbp-ink: #1a1410;
+  --color-jbp-ink-soft: #3a302a;
 
-  /* Borders */
-  --color-border-subtle: #e8dfcd;
-  --color-border-strong: #d4c5a6;
+  /* Text on light surfaces */
+  --color-jbp-text: #1a1410;
+  --color-jbp-text-2: rgba(26, 20, 16, 0.62);
+  --color-jbp-text-3: rgba(26, 20, 16, 0.38);
+  --color-jbp-hairline: rgba(26, 20, 16, 0.10);
+  --color-jbp-hairline-soft: rgba(26, 20, 16, 0.06);
 
-  /* Text */
-  --color-text-primary: #1a0f0b;
-  --color-text-secondary: #635850;
-  --color-text-tertiary: #9c8e83;
+  /* Status */
+  --color-jbp-good: #1a7f3c;
+  --color-jbp-good-soft: #e3f2e8;
+  --color-jbp-bad: #c0392b;
+  --color-jbp-bad-soft: #fae6e3;
+  --color-jbp-warn: #a87311;
+  --color-jbp-warn-soft: #f6ebd0;
 
-  /* Semantic for data viz only */
-  --color-positive: #059669;
-  --color-positive-soft: #d1fae5;
-  --color-negative: #dc2626;
-  --color-negative-soft: #fee2e2;
-  --color-warning: #d97706;
-  --color-warning-soft: #fed7aa;
+  /* Charts */
+  --color-jbp-navy: #1a3a5c;
+  --color-jbp-navy-soft: #cfd8e0;
+
+  /* Service category colors (only for breakdown viz) */
+  --color-jbp-svc-drain: #c41e1e;
+  --color-jbp-svc-water: #1a3a5c;
+  --color-jbp-svc-sewer: #a87311;
+  --color-jbp-svc-emergency: #7a1010;
+  --color-jbp-svc-plumbing: #4a4842;
+  --color-jbp-svc-all: #3a302a;
+
+  /* Legacy aliases — many existing components reference these. Keeping the
+     names lets the redesign land incrementally without a global rename. */
+  --color-bg: var(--color-jbp-cream);
+  --color-surface-card: var(--color-jbp-white);
+  --color-surface-elevated: var(--color-jbp-white);
+  --color-surface-hover: var(--color-jbp-paper);
+  --color-border-subtle: var(--color-jbp-hairline);
+  --color-border-strong: var(--color-jbp-hairline);
+  --color-text-primary: var(--color-jbp-text);
+  --color-text-secondary: var(--color-jbp-text-2);
+  --color-text-tertiary: var(--color-jbp-text-3);
+  --color-positive: var(--color-jbp-good);
+  --color-positive-soft: var(--color-jbp-good-soft);
+  --color-negative: var(--color-jbp-bad);
+  --color-negative-soft: var(--color-jbp-bad-soft);
+  --color-warning: var(--color-jbp-warn);
+  --color-warning-soft: var(--color-jbp-warn-soft);
   --color-neutral-data: #71717a;
+  --color-jbp-blue: var(--color-jbp-navy);
+  --color-jbp-blue-hover: #122a44;
+  --color-jbp-red-hover: var(--color-jbp-red-dark);
 
-  /* Mapping for shadcn-style aliases used by existing UI primitives */
+  /* shadcn aliases used by existing UI primitives */
   --color-background: var(--color-bg);
   --color-foreground: var(--color-text-primary);
   --color-card: var(--color-surface-card);
   --color-card-foreground: var(--color-text-primary);
   --color-popover: var(--color-surface-card);
   --color-popover-foreground: var(--color-text-primary);
-  --color-primary: var(--color-jbp-blue);
+  --color-primary: var(--color-jbp-red);
   --color-primary-foreground: #ffffff;
   --color-secondary: var(--color-surface-hover);
   --color-secondary-foreground: var(--color-text-primary);
@@ -59,28 +89,30 @@
   --color-destructive-foreground: #ffffff;
   --color-border: var(--color-border-subtle);
   --color-input: var(--color-border-subtle);
-  --color-ring: var(--color-jbp-blue);
-  --color-chart-1: #1561e6;
-  --color-chart-2: #059669;
-  --color-chart-3: #d97706;
-  --color-chart-4: #71717a;
-  --color-chart-5: #18181b;
+  --color-ring: var(--color-jbp-red);
+  --color-chart-1: var(--color-jbp-red);
+  --color-chart-2: var(--color-jbp-navy);
+  --color-chart-3: var(--color-jbp-good);
+  --color-chart-4: var(--color-jbp-warn);
+  --color-chart-5: var(--color-jbp-ink);
 
-  /* Fonts */
+  /* Fonts — Inter does sans + UI numbers, Archivo does the heavy display
+     numbers, JetBrains Mono powers tabular detail rows. */
   --font-sans:
-    var(--font-barlow), system-ui, -apple-system, "Segoe UI", sans-serif;
+    var(--font-inter), system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-display:
+    var(--font-archivo), var(--font-inter), system-ui, sans-serif;
   --font-mono: var(--font-jetbrains-mono), ui-monospace, monospace;
-  --font-display: var(--font-barlow), system-ui, sans-serif;
 
-  /* Radius */
-  --radius-sm: 0.25rem;
-  --radius-md: 0.375rem;
-  --radius-lg: 0.5rem;
-  --radius-xl: 0.75rem;
+  /* Radius — sharp. Heritage trade brand, not consumer SaaS. */
+  --radius-sm: 0;
+  --radius-md: 2px;
+  --radius-lg: 4px;
+  --radius-xl: 6px;
 
-  /* Shadows */
-  --shadow-card: 0 1px 2px rgba(26, 15, 11, 0.04);
-  --shadow-card-hover: 0 4px 16px rgba(26, 15, 11, 0.08);
+  /* Shadows kept minimal — borders carry the work. */
+  --shadow-card: none;
+  --shadow-card-hover: 0 4px 16px rgba(26, 20, 16, 0.06);
 }
 
 :root {
@@ -96,45 +128,55 @@
     background-color: var(--color-bg);
     color: var(--color-text-primary);
     font-family: var(--font-sans);
-    font-feature-settings: "ss01", "cv01";
-  }
-  html {
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
   body {
-    font-weight: 400;
-    font-size: 14px;
+    font-weight: 500;
+    font-size: 13px;
     line-height: 1.5;
   }
   ::selection {
-    background-color: rgba(21, 97, 230, 0.18);
+    background-color: rgba(196, 30, 30, 0.18);
     color: var(--color-text-primary);
   }
 }
 
 @layer utilities {
-  /* Display title — Barlow Black uppercase, generous tracking */
+  /* Display title — Archivo, weight 800 — for the big numbers. */
   .font-display {
     font-family: var(--font-display);
-    font-weight: 900;
-    text-transform: uppercase;
-    letter-spacing: 0.02em;
+    font-weight: 800;
+    letter-spacing: -0.02em;
   }
   .font-tabular {
     font-feature-settings: "tnum" on, "lnum" on;
     font-variant-numeric: tabular-nums lining-nums;
   }
   .text-positive {
-    color: var(--color-positive);
+    color: var(--color-jbp-good);
   }
   .text-negative {
-    color: var(--color-negative);
+    color: var(--color-jbp-bad);
   }
   .text-warning {
-    color: var(--color-warning);
+    color: var(--color-jbp-warn);
   }
   .bg-jbp-cream {
     background-color: var(--color-jbp-cream);
+  }
+  .bg-jbp-paper {
+    background-color: var(--color-jbp-paper);
+  }
+  .bg-jbp-ink {
+    background-color: var(--color-jbp-ink);
+  }
+  /* Eyebrow label — uppercase, tight tracking, 700 weight. */
+  .eyebrow {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--color-jbp-text-2);
   }
 }
