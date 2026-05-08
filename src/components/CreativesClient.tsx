@@ -102,9 +102,7 @@ export function CreativesClient({
   return (
     <main className="flex flex-1 flex-col">
       <ClientPageHeader
-        breadcrumb="Dashboard / Creatives"
         pageTitle="Creatives"
-        generatedAt={data.generated_at}
         preset={preset}
         customStart={customStart}
         customEnd={customEnd}

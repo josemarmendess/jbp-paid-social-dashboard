@@ -76,9 +76,7 @@ export function GeographyClient({
   return (
     <main className="flex flex-1 flex-col">
       <ClientPageHeader
-        breadcrumb="Dashboard / Geography"
         pageTitle="Geography"
-        generatedAt={data.generated_at}
         preset={preset}
         customStart={customStart}
         customEnd={customEnd}

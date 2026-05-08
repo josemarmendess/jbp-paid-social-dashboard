@@ -2,16 +2,13 @@
 
 import { BusinessUnitFilter } from "@/components/BusinessUnitFilter";
 import { DateRangePicker } from "@/components/DateRangePicker";
-import { FreshnessIndicator } from "@/components/FreshnessIndicator";
-import { RefreshButton } from "@/components/RefreshButton";
 import { ServiceViewToggle } from "@/components/ServiceViewToggle";
 import { buListLabel, type ServiceView } from "@/lib/buFilter";
+import { getPeriod } from "@/lib/dateRange";
 import type { DateRangePreset } from "@/lib/types";
 
 interface ClientPageHeaderProps {
-  breadcrumb: string;
   pageTitle: string;
-  generatedAt?: string;
   preset: DateRangePreset;
   customStart?: string;
   customEnd?: string;
@@ -25,20 +22,18 @@ interface ClientPageHeaderProps {
   onBuChange: (next: string[]) => void;
   view?: ServiceView;
   onViewChange?: (next: ServiceView) => void;
-  /** Set to false on pages that don't support per-service split (e.g., Performance). */
   showViewToggle?: boolean;
+  /** Optional override for the secondary line under the title. */
+  caption?: string;
 }
 
 /**
- * Shared header used by every page's *Client component. All controls are
- * controlled by the parent — no router.replace, no RSC roundtrip on filter
- * change. Mirrors the look of TopHeader so the visual diff vs the previous
- * URL-driven version is zero.
+ * Per-page filter bar. Sits below the global TabsStrip — paper background,
+ * sharp corners, hairline divider. Page title on the left, period + service
+ * filters on the right.
  */
 export function ClientPageHeader({
-  breadcrumb,
   pageTitle,
-  generatedAt,
   preset,
   customStart,
   customEnd,
@@ -49,34 +44,86 @@ export function ClientPageHeader({
   view,
   onViewChange,
   showViewToggle = true,
+  caption,
 }: ClientPageHeaderProps) {
   const filterActive = bu.length > 0;
+  const period = getPeriod(preset, customStart, customEnd);
+  const captionLine =
+    caption ??
+    `${period.label.toUpperCase()} · ${period.current.startStr} → ${period.current.endStr}`;
 
   return (
-    <header className="sticky top-0 z-20 flex h-auto flex-col gap-3 border-b border-[color:var(--color-border-subtle)] bg-[color:var(--color-jbp-cream)]/95 px-6 py-3 backdrop-blur-sm sm:h-16 sm:flex-row sm:items-center sm:gap-6 sm:py-0">
-      <div className="flex min-w-0 flex-col">
-        <span className="text-[11px] uppercase tracking-[0.08em] text-[color:var(--color-text-tertiary)]">
-          {breadcrumb}
-        </span>
-        <div className="flex items-baseline gap-2">
-          <h1
-            className="font-display text-[color:var(--color-text-primary)]"
-            style={{ fontSize: 22, lineHeight: 1.1 }}
-          >
-            {pageTitle}
-          </h1>
-          {filterActive ? (
-            <span className="inline-flex items-center rounded-full border border-[color:var(--color-jbp-blue)]/30 bg-[color:var(--color-jbp-blue)]/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[color:var(--color-jbp-blue)]">
-              {buListLabel(bu)}
-            </span>
-          ) : null}
+    <div
+      style={{
+        padding: "14px 28px",
+        background: "var(--color-jbp-paper)",
+        borderBottom: "1px solid var(--color-jbp-hairline)",
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        flexWrap: "wrap",
+        gap: 12,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 16,
+          flexWrap: "wrap",
+        }}
+      >
+        <h1
+          style={{
+            fontSize: 22,
+            fontWeight: 800,
+            margin: 0,
+            fontFamily: "var(--font-display)",
+            letterSpacing: "-0.025em",
+            color: "var(--color-jbp-text)",
+          }}
+        >
+          {pageTitle}
+        </h1>
+        <div
+          style={{
+            fontSize: 11,
+            color: "var(--color-jbp-text-3)",
+            fontFamily: "var(--font-mono)",
+            textTransform: "uppercase",
+            letterSpacing: 1,
+          }}
+        >
+          {captionLine}
         </div>
+        {filterActive ? (
+          <span
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              padding: "2px 8px",
+              fontSize: 10,
+              fontWeight: 700,
+              fontFamily: "var(--font-mono)",
+              textTransform: "uppercase",
+              letterSpacing: 0.6,
+              border: "1px solid var(--color-jbp-red)",
+              color: "var(--color-jbp-red)",
+              background: "rgba(196, 30, 30, 0.06)",
+            }}
+          >
+            {buListLabel(bu)}
+          </span>
+        ) : null}
       </div>
-
-      <div className="flex min-w-0 flex-1" />
-
-      <div className="flex flex-wrap items-center gap-2">
-        {generatedAt ? <FreshnessIndicator generatedAt={generatedAt} /> : null}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          flexWrap: "wrap",
+        }}
+      >
         <DateRangePicker
           initial={preset}
           customStart={preset === "custom" ? customStart : undefined}
@@ -91,8 +138,7 @@ export function ClientPageHeader({
         {showViewToggle && view && onViewChange ? (
           <ServiceViewToggle view={view} onChange={onViewChange} />
         ) : null}
-        <RefreshButton />
       </div>
-    </header>
+    </div>
   );
 }

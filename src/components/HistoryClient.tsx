@@ -75,9 +75,7 @@ export function HistoryClient({
   return (
     <main className="flex flex-1 flex-col">
       <ClientPageHeader
-        breadcrumb="Dashboard / History"
         pageTitle="History"
-        generatedAt={data.generated_at}
         preset={preset}
         customStart={customStart}
         customEnd={customEnd}

@@ -130,9 +130,7 @@ export function PerformanceClient({
   return (
     <main className="flex flex-1 flex-col">
       <ClientPageHeader
-        breadcrumb="Dashboard / Performance"
         pageTitle="Performance"
-        generatedAt={data.generated_at}
         preset={preset}
         customStart={customStart}
         customEnd={customEnd}

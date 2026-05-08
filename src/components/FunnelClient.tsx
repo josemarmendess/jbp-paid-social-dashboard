@@ -98,9 +98,7 @@ export function FunnelClient({
   return (
     <main className="flex flex-1 flex-col">
       <ClientPageHeader
-        breadcrumb="Dashboard / Funnel"
         pageTitle="Funnel"
-        generatedAt={data.generated_at}
         preset={preset}
         customStart={customStart}
         customEnd={customEnd}
