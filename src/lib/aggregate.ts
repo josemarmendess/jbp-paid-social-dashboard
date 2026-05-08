@@ -1069,16 +1069,21 @@ export interface Anomaly {
   /** Relative change: (current - previous) / previous. */
   change: number;
   detail: string;
+  /** Comparison window in days (e.g. 7 means last-7d vs prior-7d). */
+  window: number;
 }
 
-export function detectAnomalies(rows: DailyKpiPoint[]): Anomaly[] {
-  // Need at least 14 closed days + today. Drop today first.
-  if (rows.length < 15) return [];
+export function detectAnomalies(
+  rows: DailyKpiPoint[],
+  window = 7,
+): Anomaly[] {
+  // Need at least 2*window closed days + today. Drop today first.
+  if (rows.length < 2 * window + 1) return [];
   const closed = rows.slice(0, -1); // exclude today (still partial)
-  if (closed.length < 14) return [];
+  if (closed.length < 2 * window) return [];
 
-  const currentSlice = closed.slice(-7); // last 7 closed days
-  const previousSlice = closed.slice(-14, -7); // 7 days before that
+  const currentSlice = closed.slice(-window); // last `window` closed days
+  const previousSlice = closed.slice(-window * 2, -window); // `window` days before
 
   function sumAvg(slice: DailyKpiPoint[], getter: (r: DailyKpiPoint) => number): number {
     if (slice.length === 0) return 0;
@@ -1168,7 +1173,8 @@ export function detectAnomalies(rows: DailyKpiPoint[]): Anomaly[] {
       current: s.current,
       baseline: s.baseline,
       change,
-      detail: `${s.label} ${direction === "up" ? "up" : "down"} ${Math.abs(change * 100).toFixed(0)}% · last 7d vs prior 7d.`,
+      detail: `${s.label} ${direction === "up" ? "up" : "down"} ${Math.abs(change * 100).toFixed(0)}% · last ${window}d vs prior ${window}d.`,
+      window,
     });
   }
   return out.sort((a, b) => Math.abs(b.change) - Math.abs(a.change));

@@ -353,6 +353,7 @@ export function Metric({
   compact = false,
   last = false,
   sub,
+  spark,
 }: {
   label: string;
   value: ReactNode;
@@ -365,6 +366,8 @@ export function Metric({
   /** Drop the right border (last cell in a row). */
   last?: boolean;
   sub?: string;
+  /** Optional inline sparkline (e.g. 30-day trend behind a conversion rate). */
+  spark?: number[];
 }) {
   return (
     <div
@@ -419,7 +422,47 @@ export function Metric({
           ) : null}
         </div>
       ) : null}
+      {spark && spark.length > 1 ? (
+        <div style={{ marginTop: 4 }}>
+          <MiniSpark values={spark} />
+        </div>
+      ) : null}
     </div>
+  );
+}
+
+function MiniSpark({ values }: { values: number[] }) {
+  const w = 100;
+  const h = 22;
+  const max = Math.max(...values, 0.0001);
+  const min = Math.min(...values);
+  const range = max - min || 1;
+  const xs = values.map((_, i) => (i / Math.max(values.length - 1, 1)) * w);
+  const ys = values.map((v) => h - ((v - min) / range) * (h - 2) - 1);
+  const path =
+    "M " +
+    xs.map((x, i) => `${x.toFixed(1)},${ys[i].toFixed(1)}`).join(" L ");
+  const areaPath = `${path} L ${w.toFixed(1)},${h} L 0,${h} Z`;
+  return (
+    <svg
+      width="100%"
+      height={h}
+      viewBox={`0 0 ${w} ${h}`}
+      preserveAspectRatio="none"
+      style={{ display: "block" }}
+      aria-hidden="true"
+    >
+      <path d={areaPath} fill="var(--color-jbp-red)" fillOpacity={0.08} />
+      <path
+        d={path}
+        stroke="var(--color-jbp-red)"
+        strokeWidth="1.25"
+        fill="none"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        vectorEffect="non-scaling-stroke"
+      />
+    </svg>
   );
 }
 

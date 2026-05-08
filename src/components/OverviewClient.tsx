@@ -2,13 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
+  CumulativeSpendRatioChart,
   DualLineChart,
   DayOfWeekBars,
   HorizontalFunnel,
   RoasMeter,
-  SpendRevenueChart,
+  type CumulativePoint,
   type DualLinePoint,
-  type SpendRevenuePoint,
 } from "@/components/charts";
 import { ClientPageHeader } from "@/components/ClientPageHeader";
 import {
@@ -74,6 +74,7 @@ export function OverviewClient({
   );
   const [bu, setBu] = useState<string[]>(initialState.bu);
   const [view, setView] = useState<ServiceView>(initialState.view);
+  const [cancelWeeks, setCancelWeeks] = useState<8 | 16 | 26 | 52>(8);
   const targets = initialState.targets;
 
   useEffect(() => {
@@ -105,18 +106,36 @@ export function OverviewClient({
   const sparkDates14 = useMemo(() => rollingDaysList(14), []);
   const trendDates30 = useMemo(() => rollingDaysList(30), []);
   const dowDates = useMemo(() => rollingDaysList(30), []);
-  const anomalyDates30 = useMemo(() => rollingDaysList(30), []);
+  // 60-day series so 30/30 anomaly comparisons have enough closed days.
+  const anomalyDates60 = useMemo(() => rollingDaysList(61), []);
 
   const anomalies: Anomaly[] = useMemo(() => {
     if (!data) return [];
     const rows = dailyKpiSeries(
       data.meta_insights,
       data.servicetitan_social_leads,
-      anomalyDates30,
+      anomalyDates60,
       [],
     );
-    return detectAnomalies(rows);
-  }, [data, anomalyDates30]);
+    // Run multiple windows. Some metrics (cancellations, ROAS) only matter
+    // at longer windows because the journey is multi-week. We surface the
+    // loudest anomaly per metric across all three windows.
+    const allWindows = [
+      ...detectAnomalies(rows, 7),
+      ...detectAnomalies(rows, 14),
+      ...detectAnomalies(rows, 30),
+    ];
+    const byMetric = new Map<string, Anomaly>();
+    for (const a of allWindows) {
+      const cur = byMetric.get(a.metric);
+      if (!cur || Math.abs(a.change) > Math.abs(cur.change)) {
+        byMetric.set(a.metric, a);
+      }
+    }
+    return Array.from(byMetric.values()).sort(
+      (a, b) => Math.abs(b.change) - Math.abs(a.change),
+    );
+  }, [data, anomalyDates60]);
 
   const sliceData = useMemo(() => {
     if (!data) return [];
@@ -145,27 +164,69 @@ export function OverviewClient({
         trendDates30,
         slice.bu,
       );
-      const trendData: SpendRevenuePoint[] = trend30.map((p) => ({
-        d: p.date.slice(5),
-        spend: p.spend,
-        revenue: p.revenue,
-      }));
+      // Build the MTD-cumulative spend / revenue ratio for each day. Resets
+      // at the 1st of every month so the line shows the running ratio for
+      // the day's calendar month only.
+      let cumSpend = 0;
+      let cumRev = 0;
+      let lastMonth = "";
+      const trendData: CumulativePoint[] = trend30.map((p) => {
+        const month = p.date.slice(0, 7);
+        if (month !== lastMonth) {
+          cumSpend = 0;
+          cumRev = 0;
+          lastMonth = month;
+        }
+        cumSpend += p.spend;
+        cumRev += p.revenue;
+        return {
+          date: p.date,
+          spend: p.spend,
+          ratioPct: cumRev > 0 ? (cumSpend / cumRev) * 100 : null,
+        };
+      });
       const funnel = computeFunnel(
         data.meta_insights,
         data.servicetitan_social_leads,
         period.current,
         slice.bu,
       );
+      // 30-day per-day rate series — used as inline sparks on the
+      // conversion-rate Metric cells so they read as a trend, not a snapshot.
+      const rate30Rows = dailyKpiSeries(
+        data.meta_insights,
+        data.servicetitan_social_leads,
+        trendDates30,
+        slice.bu,
+      );
+      const safeRatio = (n: number, d: number) => (d > 0 ? n / d : 0);
+      const rateSparks = {
+        ctr: rate30Rows.map((r) => safeRatio(r.linkClicks, r.impressions)),
+        leadRate: rate30Rows.map((r) => safeRatio(r.leads, r.linkClicks)),
+        bookRate: rate30Rows.map((r) => safeRatio(r.bookedJobs, r.leads)),
+        showRate: rate30Rows.map((r) =>
+          safeRatio(r.completedJobs, r.bookedJobs),
+        ),
+        closeRate: rate30Rows.map((r) => safeRatio(r.soldJobs, r.bookedJobs)),
+        cancelRate: rate30Rows.map((r) =>
+          safeRatio(r.cancelledJobs, r.bookedJobs),
+        ),
+      };
       const cancelWeekly = cancellationRateSeries(
         data.servicetitan_social_leads,
         slice.bu,
         "week",
-        8,
+        cancelWeeks,
       );
+      // Pair each week with its prior counterpart at half the window —
+      // so 8w shows w[i] vs w[i-4], 16w vs w[i-8], etc. Keeps "current vs
+      // prior 8w" semantics regardless of the chosen window.
+      const lookback = Math.floor(cancelWeeks / 2);
       const cancelDual: DualLinePoint[] = cancelWeekly.map((p, i, arr) => ({
         bucket: p.bucket.replace(/^\d{4}-/, ""),
         current: p.rate,
-        previous: i >= 4 ? arr[i - 4]?.rate ?? null : null,
+        previous:
+          i >= lookback ? (arr[i - lookback]?.rate ?? null) : null,
       }));
       const dowSeries = dailyKpiSeries(
         data.meta_insights,
@@ -183,6 +244,7 @@ export function OverviewClient({
         trend: trendData,
         funnel,
         cancelDual,
+        rateSparks,
         dowAvg,
       };
     });
@@ -193,6 +255,7 @@ export function OverviewClient({
     sparkDates14,
     trendDates30,
     dowDates,
+    cancelWeeks,
   ]);
 
   if (!data) {
@@ -251,6 +314,9 @@ export function OverviewClient({
             trend={s.trend}
             funnel={s.funnel}
             cancelDual={s.cancelDual}
+            cancelWeeks={cancelWeeks}
+            onCancelWeeksChange={setCancelWeeks}
+            rateSparks={s.rateSparks}
             dowAvg={s.dowAvg}
             roasTarget={targets.roasTarget ?? 5}
             isFirst={i === 0}
@@ -272,6 +338,9 @@ function SliceContent({
   trend,
   funnel,
   cancelDual,
+  cancelWeeks,
+  onCancelWeeksChange,
+  rateSparks,
   dowAvg,
   roasTarget,
 }: {
@@ -280,9 +349,19 @@ function SliceContent({
   previous: OverviewKpiTotals;
   revenueSpark: number[];
   spendSpark: number[];
-  trend: SpendRevenuePoint[];
+  trend: CumulativePoint[];
   funnel: { impressions: number; linkClicks: number; leads: number; bookedJobs: number; soldJobs: number };
   cancelDual: DualLinePoint[];
+  cancelWeeks: 8 | 16 | 26 | 52;
+  onCancelWeeksChange: (next: 8 | 16 | 26 | 52) => void;
+  rateSparks: {
+    ctr: number[];
+    leadRate: number[];
+    bookRate: number[];
+    showRate: number[];
+    closeRate: number[];
+    cancelRate: number[];
+  };
   dowAvg: { day: string; value: number }[];
   roasTarget: number;
   isFirst: boolean;
@@ -406,23 +485,26 @@ function SliceContent({
         </div>
       </Card>
 
-      {/* Trends */}
+      {/* Trends — daily spend bars + cumulative spend/revenue % line.
+          The line resets at the 1st of each month, so any day's value
+          reads as "running spend ÷ revenue from the start of THIS month
+          through this day". Lower = more efficient. */}
       <Card>
         <CardHeader
           eyebrow="Trends"
-          title="Daily Spend vs Revenue"
-          sub="last 30 days · revenue attributed by close date"
+          title="Daily spend vs MTD spend / revenue"
+          sub="last 30 days · ratio resets each month"
           right={
             <ChartLegend
               items={[
-                { color: "var(--color-jbp-red)", label: "Spend", style: "block" },
-                { color: "var(--color-jbp-navy)", label: "Revenue", style: "line" },
+                { color: "var(--color-jbp-red)", label: "Daily spend", style: "block" },
+                { color: "var(--color-jbp-navy)", label: "MTD ratio %", style: "line" },
               ]}
             />
           }
         />
         <div style={{ padding: "20px 16px 8px" }}>
-          <SpendRevenueChart data={trend} />
+          <CumulativeSpendRatioChart data={trend} />
         </div>
       </Card>
 
@@ -442,30 +524,35 @@ function SliceContent({
             label="CTR"
             value={current.ctr ? formatPercent(current.ctr) : "—"}
             delta={d(current.ctr, previous.ctr)}
+            spark={rateSparks.ctr}
             compact
           />
           <Metric
             label="Lead Rate"
             value={current.leadRate ? formatPercent(current.leadRate) : "—"}
             delta={d(current.leadRate, previous.leadRate)}
+            spark={rateSparks.leadRate}
             compact
           />
           <Metric
             label="Book Rate"
             value={current.bookRate ? formatPercent(current.bookRate) : "—"}
             delta={d(current.bookRate, previous.bookRate)}
+            spark={rateSparks.bookRate}
             compact
           />
           <Metric
             label="Show Rate"
             value={current.showRate ? formatPercent(current.showRate) : "—"}
             delta={d(current.showRate, previous.showRate)}
+            spark={rateSparks.showRate}
             compact
           />
           <Metric
             label="Close Rate"
             value={current.closeRate ? formatPercent(current.closeRate) : "—"}
             delta={d(current.closeRate, previous.closeRate)}
+            spark={rateSparks.closeRate}
             compact
           />
           <Metric
@@ -476,6 +563,7 @@ function SliceContent({
                 : "—"
             }
             delta={d(current.cancellationRate, previous.cancellationRate)}
+            spark={rateSparks.cancelRate}
             invertDelta
             compact
             last
@@ -568,7 +656,13 @@ function SliceContent({
         <Card>
           <CardHeader
             eyebrow="Cancellation rate"
-            title="Weekly · 8w trail"
+            title={`Weekly · ${cancelWeeks}w trail`}
+            right={
+              <WeeksToggle
+                value={cancelWeeks}
+                onChange={onCancelWeeksChange}
+              />
+            }
           />
           <div style={{ padding: "16px 20px 8px" }}>
             <DualLineChart data={cancelDual} />
@@ -603,7 +697,7 @@ function SliceContent({
                       "1.5px dashed var(--color-jbp-text-2)",
                   }}
                 />
-                Previous 8w
+                Previous {Math.floor(cancelWeeks / 2)}w
               </span>
             </div>
           </div>
@@ -685,7 +779,7 @@ function AlertsStrip({ anomalies }: { anomalies: Anomaly[] }) {
               letterSpacing: 0.4,
             }}
           >
-            last 7d vs prior 7d
+            window adapts per metric
           </div>
         </div>
       </div>
@@ -712,9 +806,20 @@ function AlertsStrip({ anomalies }: { anomalies: Anomaly[] }) {
                 fontFamily: "var(--font-mono)",
                 textTransform: "uppercase",
                 letterSpacing: 0.6,
+                display: "flex",
+                gap: 6,
+                alignItems: "baseline",
               }}
             >
-              {a.label}
+              <span>{a.label}</span>
+              <span
+                style={{
+                  fontSize: 9,
+                  color: "var(--color-jbp-text-3)",
+                }}
+              >
+                {a.window}d
+              </span>
             </div>
             <span
               style={{
@@ -731,6 +836,59 @@ function AlertsStrip({ anomalies }: { anomalies: Anomaly[] }) {
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+/* ───────────────────────────── Weeks toggle ───────────────────────────── */
+
+function WeeksToggle({
+  value,
+  onChange,
+}: {
+  value: 8 | 16 | 26 | 52;
+  onChange: (next: 8 | 16 | 26 | 52) => void;
+}) {
+  const opts: Array<8 | 16 | 26 | 52> = [8, 16, 26, 52];
+  return (
+    <div
+      role="group"
+      aria-label="Window length (weeks)"
+      style={{
+        display: "inline-flex",
+        border: "1px solid var(--color-jbp-hairline)",
+        background: "var(--color-jbp-white)",
+      }}
+    >
+      {opts.map((n, i) => {
+        const active = n === value;
+        return (
+          <button
+            key={n}
+            type="button"
+            onClick={() => onChange(n)}
+            style={{
+              padding: "4px 10px",
+              border: "none",
+              borderLeft:
+                i > 0 ? "1px solid var(--color-jbp-hairline)" : "none",
+              background: active
+                ? "var(--color-jbp-ink)"
+                : "transparent",
+              color: active
+                ? "var(--color-jbp-cream)"
+                : "var(--color-jbp-text-2)",
+              fontFamily: "var(--font-mono)",
+              fontSize: 10,
+              fontWeight: active ? 700 : 600,
+              letterSpacing: 0.6,
+              cursor: "pointer",
+            }}
+          >
+            {n}W
+          </button>
+        );
+      })}
     </div>
   );
 }

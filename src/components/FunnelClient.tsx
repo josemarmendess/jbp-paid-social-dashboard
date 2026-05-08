@@ -207,7 +207,10 @@ function FunnelSlice({
     booked: funnel.bookedJobs,
     sold: funnel.soldJobs,
   };
-  const max = funnel.impressions || 1;
+  // Sizing the trapezoid by impressions made every other bar tiny and
+  // illegible. Use clicks as the visual max (so impressions becomes a
+  // full-width header) and floor every bar at 35% so labels + values fit.
+  const visualMax = funnel.linkClicks || 1;
 
   const d = (curr: number, prev: number) => pctChange(curr, prev) * 100;
 
@@ -247,11 +250,17 @@ function FunnelSlice({
               alignItems: "center",
             }}
           >
-            {stages.map((s) => {
-              const widthPct = Math.max(
-                Math.pow(s.value / max, 0.55) * 100,
-                6,
-              );
+            {stages.map((s, idx) => {
+              // Stage 0 (Impressions) renders as a full-width header bar so
+              // its raw count doesn't dwarf the rest. Stages 1+ scale against
+              // link clicks with a 35% floor for legibility.
+              const widthPct =
+                idx === 0
+                  ? 100
+                  : Math.max(
+                      Math.pow(s.value / visualMax, 0.55) * 100,
+                      35,
+                    );
               const dropRate =
                 s.prev && valueByKey[s.prev] > 0
                   ? (s.value / valueByKey[s.prev]) * 100
