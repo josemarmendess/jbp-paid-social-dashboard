@@ -2,13 +2,24 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { ClientPageHeader } from "@/components/ClientPageHeader";
+import {
+  Card,
+  CardHeader,
+  Eyebrow,
+  SimpleKpi,
+} from "@/components/design";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { GeographicMap } from "@/components/GeographicMap";
 import { usePaidSocialData } from "@/components/PaidSocialDataProvider";
-import { aggregateByZip } from "@/lib/aggregate";
+import { aggregateByZip, type ZipMetrics } from "@/lib/aggregate";
 import { getServiceSlices, type ServiceView } from "@/lib/buFilter";
 import { appendCommonFilters, replaceQuery } from "@/lib/clientUrlState";
 import { getPeriod } from "@/lib/dateRange";
+import {
+  formatCompactMoney,
+  formatCurrency,
+  formatInt,
+} from "@/lib/format";
 import type { DateRangePreset } from "@/lib/types";
 
 interface GeographyClientProps {
@@ -64,9 +75,16 @@ export function GeographyClient({
 
   if (!data) {
     return (
-      <main className="flex flex-1 flex-col">
+      <main style={{ flex: 1 }}>
         <ErrorBanner message={error ?? "Try refreshing."} />
-        <div className="flex flex-1 items-center justify-center px-6 py-16 text-sm text-[color:var(--color-text-tertiary)]">
+        <div
+          style={{
+            padding: "64px 24px",
+            textAlign: "center",
+            color: "var(--color-jbp-text-3)",
+            fontSize: 13,
+          }}
+        >
           No data available.
         </div>
       </main>
@@ -74,7 +92,7 @@ export function GeographyClient({
   }
 
   return (
-    <main className="flex flex-1 flex-col">
+    <>
       <ClientPageHeader
         pageTitle="Geography"
         preset={preset}
@@ -91,37 +109,234 @@ export function GeographyClient({
         view={view}
         onViewChange={setView}
       />
-      <div className="mx-auto flex w-full max-w-[1400px] flex-1 flex-col gap-6 px-6 py-6 sm:px-8">
-        <div className="flex items-baseline justify-between">
-          <span className="text-[12px] uppercase tracking-[0.08em] text-[color:var(--color-text-tertiary)]">
-            {period.label} · {period.current.startStr} →{" "}
-            {period.current.endStr} · click any marker / row to focus
-          </span>
-          <span className="text-[11px] uppercase tracking-[0.08em] text-[color:var(--color-text-tertiary)]">
-            America/Chicago
-          </span>
-        </div>
-
+      <div
+        style={{
+          padding: "20px 28px 32px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 20,
+        }}
+      >
         {sliceData.map(({ slice, rows }) => (
-          <section key={`geo-${slice.key}`} className="flex flex-col gap-3">
-            {slices.length > 1 ? (
-              <div className="flex items-center gap-3">
-                <span
-                  className="font-display text-[color:var(--color-text-primary)]"
-                  style={{ fontSize: 15, letterSpacing: "0.06em" }}
-                >
-                  {slice.label}
-                </span>
-                <span className="h-[1px] flex-1 bg-[color:var(--color-border-subtle)]" />
-                <span className="text-[11px] tabular-nums text-[color:var(--color-text-tertiary)]">
-                  {rows.length} ZIP{rows.length === 1 ? "" : "s"}
-                </span>
-              </div>
-            ) : null}
-            <GeographicMap rows={rows} />
-          </section>
+          <GeographySlice
+            key={slice.key}
+            sliceLabel={slices.length > 1 ? slice.label : null}
+            rows={rows}
+          />
         ))}
       </div>
-    </main>
+    </>
+  );
+}
+
+function GeographySlice({
+  sliceLabel,
+  rows,
+}: {
+  sliceLabel: string | null;
+  rows: ZipMetrics[];
+}) {
+  const totalLeads = rows.reduce((s, z) => s + z.leads, 0);
+  const totalRev = rows.reduce((s, z) => s + z.sales, 0);
+  const top = rows[0];
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      {sliceLabel ? (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            paddingTop: 4,
+          }}
+        >
+          <Eyebrow size={11}>{sliceLabel}</Eyebrow>
+          <span
+            style={{
+              flex: 1,
+              height: 1,
+              background: "var(--color-jbp-hairline)",
+            }}
+          />
+        </div>
+      ) : null}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(4, 1fr)",
+          gap: 16,
+        }}
+      >
+        <SimpleKpi
+          label="ZIP codes"
+          value={formatInt(rows.length)}
+          sub="active service areas"
+        />
+        <SimpleKpi
+          label="Top ZIP"
+          value={top?.zip ?? "—"}
+          sub={top ? `${formatInt(top.leads)} leads` : "no data"}
+        />
+        <SimpleKpi
+          label="Total leads"
+          value={formatInt(totalLeads)}
+          sub="this window"
+        />
+        <SimpleKpi
+          label="Revenue"
+          value={formatCompactMoney(totalRev)}
+          sub="attributed by zip"
+          accent
+        />
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1.2fr 1fr",
+          gap: 16,
+        }}
+      >
+        <Card>
+          <CardHeader
+            eyebrow="Service map"
+            title="Heat by lead volume"
+            right={
+              <span
+                style={{
+                  fontSize: 10,
+                  fontFamily: "var(--font-mono)",
+                  color: "var(--color-jbp-text-3)",
+                  textTransform: "uppercase",
+                  letterSpacing: 1,
+                }}
+              >
+                Click any marker to focus
+              </span>
+            }
+          />
+          <div
+            style={{
+              padding: 0,
+              background: "var(--color-jbp-paper)",
+              minHeight: 380,
+            }}
+          >
+            <GeographicMap rows={rows} />
+          </div>
+        </Card>
+
+        <Card>
+          <CardHeader eyebrow="Top ZIPs" title="By lead volume" />
+          <div
+            style={{
+              maxHeight: 420,
+              overflowY: "auto",
+            }}
+          >
+            <table
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                fontSize: 12,
+              }}
+            >
+              <thead>
+                <tr
+                  style={{
+                    background: "var(--color-jbp-paper)",
+                    borderBottom: "1px solid var(--color-jbp-hairline)",
+                    position: "sticky",
+                    top: 0,
+                  }}
+                >
+                  {["ZIP", "Leads", "Booked", "Revenue", "CPL"].map((h, i) => (
+                    <th
+                      key={h}
+                      style={{
+                        padding: "10px 12px",
+                        textAlign: i === 0 ? "left" : "right",
+                        fontSize: 10,
+                        fontWeight: 700,
+                        letterSpacing: 1,
+                        textTransform: "uppercase",
+                        color: "var(--color-jbp-text-2)",
+                      }}
+                    >
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.slice(0, 50).map((z) => (
+                  <tr
+                    key={z.zip}
+                    style={{
+                      borderBottom:
+                        "1px solid var(--color-jbp-hairline-soft)",
+                    }}
+                  >
+                    <td
+                      style={{
+                        padding: "10px 12px",
+                        fontFamily: "var(--font-mono)",
+                        fontWeight: 700,
+                      }}
+                    >
+                      {z.zip}
+                    </td>
+                    <td
+                      style={{
+                        padding: "10px 12px",
+                        textAlign: "right",
+                        fontFamily: "var(--font-mono)",
+                        fontVariantNumeric: "tabular-nums",
+                        fontWeight: 700,
+                      }}
+                    >
+                      {z.leads}
+                    </td>
+                    <td
+                      style={{
+                        padding: "10px 12px",
+                        textAlign: "right",
+                        fontFamily: "var(--font-mono)",
+                        fontVariantNumeric: "tabular-nums",
+                      }}
+                    >
+                      {z.bookedJobs}
+                    </td>
+                    <td
+                      style={{
+                        padding: "10px 12px",
+                        textAlign: "right",
+                        fontFamily: "var(--font-mono)",
+                        fontVariantNumeric: "tabular-nums",
+                      }}
+                    >
+                      {formatCompactMoney(z.sales)}
+                    </td>
+                    <td
+                      style={{
+                        padding: "10px 12px",
+                        textAlign: "right",
+                        fontFamily: "var(--font-mono)",
+                        fontVariantNumeric: "tabular-nums",
+                      }}
+                    >
+                      {z.allocatedSpend > 0 && z.leads > 0
+                        ? formatCurrency(z.allocatedSpend / z.leads)
+                        : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      </div>
+    </div>
   );
 }

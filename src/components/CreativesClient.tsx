@@ -3,14 +3,24 @@
 import { useEffect, useMemo, useState } from "react";
 import { ClientPageHeader } from "@/components/ClientPageHeader";
 import { CreativeGallery } from "@/components/CreativeGallery";
+import {
+  Eyebrow,
+  SimpleKpi,
+} from "@/components/design";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { usePaidSocialData } from "@/components/PaidSocialDataProvider";
 import { aggregateByAd, buildAdSevenDaySpend } from "@/lib/aggregate";
+import type { AggregatedAd } from "@/lib/types";
 import { getServiceSlices, type ServiceView } from "@/lib/buFilter";
 import { appendCommonFilters, replaceQuery } from "@/lib/clientUrlState";
 import { getPeriod } from "@/lib/dateRange";
+import { formatInt } from "@/lib/format";
 import { rollingDaysList } from "@/lib/periods";
 import type { DateRangePreset, MetaAdCreativeRow } from "@/lib/types";
+
+const WIN_CTR = 0.015;
+const WIN_CPL_QUANTILE = 0.5; // top half of CPL = "low CPL"
+const UNDER_CTR = 0.005;
 
 interface CreativesClientProps {
   businessUnits: string[];
@@ -90,9 +100,16 @@ export function CreativesClient({
 
   if (!data) {
     return (
-      <main className="flex flex-1 flex-col">
+      <main style={{ flex: 1 }}>
         <ErrorBanner message={error ?? "Try refreshing."} />
-        <div className="flex flex-1 items-center justify-center px-6 py-16 text-sm text-[color:var(--color-text-tertiary)]">
+        <div
+          style={{
+            padding: "64px 24px",
+            textAlign: "center",
+            color: "var(--color-jbp-text-3)",
+            fontSize: 13,
+          }}
+        >
           No data available.
         </div>
       </main>
@@ -100,7 +117,7 @@ export function CreativesClient({
   }
 
   return (
-    <main className="flex flex-1 flex-col">
+    <>
       <ClientPageHeader
         pageTitle="Creatives"
         preset={preset}
@@ -116,48 +133,126 @@ export function CreativesClient({
         onBuChange={setBu}
         view={view}
         onViewChange={setView}
+        caption={
+          Object.keys(creativeByAd).length === 0
+            ? "Thumbnails will appear once meta_ad_creatives is in the API"
+            : undefined
+        }
       />
-      <div className="mx-auto flex w-full max-w-[1320px] flex-1 flex-col gap-6 px-6 py-6 sm:px-8">
-        <div className="flex items-baseline justify-between">
-          <span className="text-[12px] uppercase tracking-[0.08em] text-[color:var(--color-text-tertiary)]">
-            {period.label} · {period.current.startStr} →{" "}
-            {period.current.endStr}
-            {!Object.keys(creativeByAd).length
-              ? " · creative thumbnails will appear once meta_ad_creatives is in the API"
-              : ""}
-          </span>
-          <span className="text-[11px] uppercase tracking-[0.08em] text-[color:var(--color-text-tertiary)]">
-            America/Chicago
-          </span>
-        </div>
-
+      <div
+        style={{
+          padding: "20px 28px 32px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 20,
+        }}
+      >
         {sliceData.map(({ slice, ads }) => (
-          <section
-            key={`gallery-${slice.key}`}
-            className="flex flex-col gap-3"
-          >
-            {slices.length > 1 ? (
-              <div className="flex items-center gap-3">
-                <span
-                  className="font-display text-[color:var(--color-text-primary)]"
-                  style={{ fontSize: 15, letterSpacing: "0.06em" }}
-                >
-                  {slice.label}
-                </span>
-                <span className="h-[1px] flex-1 bg-[color:var(--color-border-subtle)]" />
-                <span className="text-[11px] tabular-nums text-[color:var(--color-text-tertiary)]">
-                  {ads.length} creatives
-                </span>
-              </div>
-            ) : null}
-            <CreativeGallery
-              ads={ads}
-              creativeByAd={creativeByAd}
-              sevenDayByAd={sevenDayByAd}
-            />
-          </section>
+          <CreativesSlice
+            key={slice.key}
+            sliceLabel={slices.length > 1 ? slice.label : null}
+            ads={ads}
+            creativeByAd={creativeByAd}
+            sevenDayByAd={sevenDayByAd}
+          />
         ))}
       </div>
-    </main>
+    </>
+  );
+}
+
+function CreativesSlice({
+  sliceLabel,
+  ads,
+  creativeByAd,
+  sevenDayByAd,
+}: {
+  sliceLabel: string | null;
+  ads: AggregatedAd[];
+  creativeByAd: Record<string, MetaAdCreativeRow>;
+  sevenDayByAd: Record<string, number[]>;
+}) {
+  // Tag winners / underperformers using simple thresholds.
+  const ctrFor = (a: AggregatedAd) =>
+    a.impressions > 0 ? a.linkClicks / a.impressions : 0;
+  const cpls = ads
+    .filter((a) => a.leads > 0 && a.spend > 0)
+    .map((a) => a.spend / a.leads)
+    .sort((a, b) => a - b);
+  const cplCutoff =
+    cpls.length > 0
+      ? cpls[Math.floor(cpls.length * WIN_CPL_QUANTILE)] ?? Infinity
+      : Infinity;
+
+  const winners = ads.filter(
+    (a) =>
+      ctrFor(a) >= WIN_CTR &&
+      a.leads > 0 &&
+      a.spend > 0 &&
+      a.spend / a.leads <= cplCutoff,
+  );
+  const underperformers = ads.filter(
+    (a) => ctrFor(a) < UNDER_CTR && a.spend > 50,
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      {sliceLabel ? (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            paddingTop: 4,
+          }}
+        >
+          <Eyebrow size={11}>{sliceLabel}</Eyebrow>
+          <span
+            style={{
+              flex: 1,
+              height: 1,
+              background: "var(--color-jbp-hairline)",
+            }}
+          />
+        </div>
+      ) : null}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(4, 1fr)",
+          gap: 16,
+        }}
+      >
+        <SimpleKpi
+          label="Active creatives"
+          value={formatInt(ads.length)}
+          sub={`${Object.keys(creativeByAd).length} with thumbs`}
+        />
+        <SimpleKpi
+          label="Winners"
+          value={formatInt(winners.length)}
+          sub={`CTR ≥ ${(WIN_CTR * 100).toFixed(1)}% · low CPL`}
+        />
+        <SimpleKpi
+          label="Underperformers"
+          value={formatInt(underperformers.length)}
+          sub={`CTR < ${(UNDER_CTR * 100).toFixed(1)}% · spend > $50`}
+        />
+        <SimpleKpi
+          label="Total spend"
+          value={`$${Math.round(
+            ads.reduce((s, a) => s + a.spend, 0),
+          ).toLocaleString("en-US")}`}
+          sub="across active creatives"
+          accent
+        />
+      </div>
+
+      <CreativeGallery
+        ads={ads}
+        creativeByAd={creativeByAd}
+        sevenDayByAd={sevenDayByAd}
+      />
+    </div>
   );
 }
