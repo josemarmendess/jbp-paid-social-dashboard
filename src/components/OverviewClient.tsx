@@ -1,48 +1,53 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AnomalyBanner } from "@/components/AnomalyBanner";
-import { CancellationRateChart } from "@/components/CancellationRateChart";
+import {
+  DualLineChart,
+  DayOfWeekBars,
+  HorizontalFunnel,
+  RoasMeter,
+  SpendRevenueChart,
+  type DualLinePoint,
+  type SpendRevenuePoint,
+} from "@/components/charts";
 import { ClientPageHeader } from "@/components/ClientPageHeader";
-import { DailyTrendChart } from "@/components/DailyTrendChart";
-import { DayOfWeekChart } from "@/components/DayOfWeekChart";
+import {
+  Card,
+  CardHeader,
+  Delta,
+  Eyebrow,
+  HeroKpi,
+  Metric,
+} from "@/components/design";
 import { ErrorBanner } from "@/components/ErrorBanner";
-import { FunnelChart } from "@/components/FunnelChart";
-import { KpiCard } from "@/components/KpiCard";
 import { usePaidSocialData } from "@/components/PaidSocialDataProvider";
-import { PivotCustomize, PivotTable } from "@/components/PivotTable";
 import {
   cancellationRateSeries,
   computeFunnel,
   computeOverviewKpis,
-  computePivotMetrics,
   dailyKpiSeries,
   dailySpendVsRevenue,
   detectAnomalies,
+  type Anomaly,
+  type OverviewKpiTotals,
 } from "@/lib/aggregate";
 import { getServiceSlices, type ServiceView } from "@/lib/buFilter";
 import { appendCommonFilters, replaceQuery } from "@/lib/clientUrlState";
 import { getPeriod } from "@/lib/dateRange";
 import {
+  formatCompactInt,
+  formatCompactMoney,
   formatCurrency,
   formatInt,
   formatPercent,
+  pctChange,
 } from "@/lib/format";
-import { goalChip, type GoalTargets } from "@/lib/goals";
-import { METRIC_DEFS } from "@/lib/metricDefinitions";
-import {
-  getPivotPeriods,
-  getRollingRange,
-  rollingDaysList,
-} from "@/lib/periods";
-import { ALL_PIVOT_ROW_KEYS, DEFAULT_PIVOT_ROW_KEYS } from "@/lib/pivotConfig";
-import { toneForLabel } from "@/lib/sliceColors";
+import type { GoalTargets } from "@/lib/goals";
+import { rollingDaysList } from "@/lib/periods";
 import type { DateRangePreset } from "@/lib/types";
 
 interface OverviewClientProps {
-  /** Canonical service taxonomy — passed in to avoid re-deriving on the client. */
   businessUnits: string[];
-  /** State derived from the URL's searchParams on first render. */
   initialState: {
     preset: DateRangePreset;
     customStart?: string;
@@ -55,17 +60,6 @@ interface OverviewClientProps {
   };
 }
 
-/**
- * Overview content rendered entirely on the client. The server hands us the
- * Apps Script payload ONCE; from there, every filter (date / BU / view /
- * pivot config) lives in React state and re-derives via useMemo. Filter
- * changes do NOT trigger a server round-trip — they're a pure client
- * re-render against the data already in memory.
- *
- * URL is kept in sync via window.history.replaceState so shareable links
- * still work. The "Updated …" indicator is set once per page load and stays
- * stable until the user clicks Refresh.
- */
 export function OverviewClient({
   businessUnits,
   initialState,
@@ -80,39 +74,11 @@ export function OverviewClient({
   );
   const [bu, setBu] = useState<string[]>(initialState.bu);
   const [view, setView] = useState<ServiceView>(initialState.view);
-  const [pivotRowKeys, setPivotRowKeys] = useState<string[]>(
-    initialState.pivotRowKeys,
-  );
-  const [pivotColKeys, setPivotColKeys] = useState<string[]>(
-    initialState.pivotColKeys,
-  );
   const targets = initialState.targets;
 
-  // Mirror state to the URL via replaceState — no router.replace, so no
-  // RSC fetch and no server-side re-render. Shareable links still work.
   useEffect(() => {
     const sp = new URLSearchParams();
     appendCommonFilters(sp, { preset, customStart, customEnd, bu, view });
-    if (
-      pivotRowKeys.length === 0 ||
-      (pivotRowKeys.length !== ALL_PIVOT_ROW_KEYS.length &&
-        !sameSet(pivotRowKeys, DEFAULT_PIVOT_ROW_KEYS))
-    ) {
-      sp.set(
-        "pivotRows",
-        pivotRowKeys.length === 0 ? "_none_" : pivotRowKeys.join(","),
-      );
-    }
-    const allColKeys = getPivotPeriods().map((p) => p.key);
-    if (
-      pivotColKeys.length === 0 ||
-      pivotColKeys.length !== allColKeys.length
-    ) {
-      sp.set(
-        "pivotCols",
-        pivotColKeys.length === 0 ? "_none_" : pivotColKeys.join(","),
-      );
-    }
     if (targets.cplTarget != null)
       sp.set("cplTarget", String(targets.cplTarget));
     if (targets.roasTarget != null)
@@ -126,37 +92,31 @@ export function OverviewClient({
     customEnd,
     bu,
     view,
-    pivotRowKeys,
-    pivotColKeys,
     targets.cplTarget,
     targets.roasTarget,
     targets.cancelTarget,
   ]);
 
-  // Derived values — every filter change re-runs these synchronously in the
-  // browser. With 2.4k Meta rows and a few thousand ServiceTitan rows the
-  // total compute is single-digit ms, way below human perception.
   const period = useMemo(
     () => getPeriod(preset, customStart, customEnd),
     [preset, customStart, customEnd],
   );
   const slices = useMemo(() => getServiceSlices(bu, view), [bu, view]);
-  const sparkDates30 = useMemo(() => rollingDaysList(30), []);
-  const trendDates = useMemo(() => rollingDaysList(90), []);
+  const sparkDates14 = useMemo(() => rollingDaysList(14), []);
+  const trendDates30 = useMemo(() => rollingDaysList(30), []);
   const dowDates = useMemo(() => rollingDaysList(30), []);
-  const last30Range = useMemo(() => getRollingRange(30), []);
-  const pivotPeriods = useMemo(() => getPivotPeriods(), []);
+  const anomalyDates30 = useMemo(() => rollingDaysList(30), []);
 
-  const anomalies = useMemo(() => {
+  const anomalies: Anomaly[] = useMemo(() => {
     if (!data) return [];
     const rows = dailyKpiSeries(
       data.meta_insights,
       data.servicetitan_social_leads,
-      sparkDates30,
+      anomalyDates30,
       [],
     );
     return detectAnomalies(rows);
-  }, [data, sparkDates30]);
+  }, [data, anomalyDates30]);
 
   const sliceData = useMemo(() => {
     if (!data) return [];
@@ -173,101 +133,80 @@ export function OverviewClient({
         period.previous,
         slice.bu,
       );
-      const sparkRows = dailyKpiSeries(
+      const sparkRows14 = dailyKpiSeries(
         data.meta_insights,
         data.servicetitan_social_leads,
-        sparkDates30,
+        sparkDates14,
         slice.bu,
       );
-      const safeRatio = (n: number, d: number) => (d > 0 ? n / d : 0);
-      const sparks = {
-        spend: sparkRows.map((r) => r.spend),
-        leads: sparkRows.map((r) => r.leads),
-        booked: sparkRows.map((r) => r.bookedJobs),
-        sold: sparkRows.map((r) => r.soldJobs),
-        sales: sparkRows.map((r) => r.sales),
-        spendOnRevenue: sparkRows.map((r) => safeRatio(r.spend, r.revenue)),
-        costPerLead: sparkRows.map((r) => safeRatio(r.spend, r.leads)),
-        costPerBookedJob: sparkRows.map((r) =>
-          safeRatio(r.spend, r.bookedJobs),
-        ),
-        ctr: sparkRows.map((r) => safeRatio(r.linkClicks, r.impressions)),
-        leadRate: sparkRows.map((r) => safeRatio(r.leads, r.linkClicks)),
-        bookRate: sparkRows.map((r) => safeRatio(r.bookedJobs, r.leads)),
-        showRate: sparkRows.map((r) =>
-          safeRatio(r.completedJobs, r.bookedJobs),
-        ),
-        closeRate: sparkRows.map((r) => safeRatio(r.soldJobs, r.bookedJobs)),
-        cancellationRate: sparkRows.map((r) =>
-          safeRatio(r.cancelledJobs, r.bookedJobs),
-        ),
-      };
-      const pivotValues = pivotPeriods.map((p) =>
-        computePivotMetrics(
-          data.meta_insights,
-          data.servicetitan_social_leads,
-          p.range,
-          slice.bu,
-        ),
-      );
-      const trend = dailySpendVsRevenue(
+      const trend30 = dailySpendVsRevenue(
         data.meta_insights,
         data.servicetitan_social_leads,
-        trendDates,
+        trendDates30,
         slice.bu,
       );
-      const dowSeries = dailyKpiSeries(
-        data.meta_insights,
-        data.servicetitan_social_leads,
-        dowDates,
-        slice.bu,
-      );
+      const trendData: SpendRevenuePoint[] = trend30.map((p) => ({
+        d: p.date.slice(5),
+        spend: p.spend,
+        revenue: p.revenue,
+      }));
       const funnel = computeFunnel(
         data.meta_insights,
         data.servicetitan_social_leads,
         period.current,
         slice.bu,
       );
-      const weeklyAll = cancellationRateSeries(
+      const cancelWeekly = cancellationRateSeries(
         data.servicetitan_social_leads,
         slice.bu,
         "week",
-        52,
+        8,
       );
-      const monthlyAll = cancellationRateSeries(
+      const cancelDual: DualLinePoint[] = cancelWeekly.map((p, i, arr) => ({
+        bucket: p.bucket.replace(/^\d{4}-/, ""),
+        current: p.rate,
+        previous: i >= 4 ? arr[i - 4]?.rate ?? null : null,
+      }));
+      const dowSeries = dailyKpiSeries(
+        data.meta_insights,
         data.servicetitan_social_leads,
+        dowDates,
         slice.bu,
-        "month",
-        48,
       );
+      const dowAvg = aggregateDayOfWeek(dowSeries);
       return {
         slice,
         current,
         previous,
-        sparks,
-        pivotValues,
-        trend,
-        dowSeries,
+        revenueSpark: sparkRows14.map((r) => r.sales),
+        spendSpark: sparkRows14.map((r) => r.spend),
+        trend: trendData,
         funnel,
-        weeklyAll,
-        monthlyAll,
+        cancelDual,
+        dowAvg,
       };
     });
   }, [
+    data,
     slices,
     period,
-    data,
-    sparkDates30,
-    trendDates,
+    sparkDates14,
+    trendDates30,
     dowDates,
-    pivotPeriods,
   ]);
 
   if (!data) {
     return (
-      <main className="flex flex-1 flex-col">
+      <main style={{ flex: 1 }}>
         <ErrorBanner message={error ?? "Try refreshing."} />
-        <div className="flex flex-1 items-center justify-center px-6 py-16 text-sm text-[color:var(--color-text-tertiary)]">
+        <div
+          style={{
+            padding: "64px 24px",
+            textAlign: "center",
+            color: "var(--color-jbp-text-3)",
+            fontSize: 13,
+          }}
+        >
           No data available.
         </div>
       </main>
@@ -275,7 +214,7 @@ export function OverviewClient({
   }
 
   return (
-    <main className="flex flex-1 flex-col">
+    <>
       <ClientPageHeader
         pageTitle="Overview"
         preset={preset}
@@ -292,361 +231,608 @@ export function OverviewClient({
         view={view}
         onViewChange={setView}
       />
-
-      <div className="mx-auto flex w-full max-w-[1320px] flex-1 flex-col gap-8 px-6 py-6 sm:px-8">
-        <div className="flex items-baseline justify-between">
-          <div className="flex flex-col">
-            <span className="text-[12px] uppercase tracking-[0.08em] text-[color:var(--color-text-tertiary)]">
-              {period.label} · {period.current.startStr} →{" "}
-              {period.current.endStr}
-            </span>
-            <span className="text-[13px] text-[color:var(--color-text-secondary)]">
-              {period.previousLabel}
-            </span>
-          </div>
-          <span className="text-[11px] uppercase tracking-[0.08em] text-[color:var(--color-text-tertiary)]">
-            America/Chicago
-          </span>
-        </div>
-
-        {anomalies.length > 0 ? <AnomalyBanner anomalies={anomalies} /> : null}
-
-        {sliceData.map(({ slice, current, previous, sparks }) => (
-          <section
-            key={`kpi-${slice.key}`}
-            aria-label={`KPIs · ${slice.label}`}
-            className="flex flex-col gap-3"
-          >
-            {slices.length > 1 ? <SliceHeader label={slice.label} /> : null}
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-4 xl:grid-cols-7">
-              <KpiCard
-                label="Spend"
-                value={formatCurrency(current.spend)}
-                current={current.spend}
-                previous={previous.spend}
-                invertDelta
-                sparkline={sparks.spend}
-                tooltip={METRIC_DEFS.spend}
-              />
-              <KpiCard
-                label="Leads"
-                value={formatInt(current.leads)}
-                current={current.leads}
-                previous={previous.leads}
-                sparkline={sparks.leads}
-                tooltip={METRIC_DEFS.leads}
-              />
-              <KpiCard
-                label="Cost per Lead"
-                value={
-                  current.costPerLead
-                    ? formatCurrency(current.costPerLead, true)
-                    : "—"
-                }
-                current={current.costPerLead}
-                previous={previous.costPerLead}
-                invertDelta
-                sparkline={sparks.costPerLead}
-                hint="spend / leads"
-                tooltip={METRIC_DEFS.costPerLead}
-                goalChip={goalChip(
-                  "cpl",
-                  current.costPerLead,
-                  targets.cplTarget,
-                )}
-              />
-              <KpiCard
-                label="Booked Jobs"
-                value={formatInt(current.bookedJobs)}
-                current={current.bookedJobs}
-                previous={previous.bookedJobs}
-                sparkline={sparks.booked}
-                tooltip={METRIC_DEFS.bookedJobs}
-              />
-              <KpiCard
-                label="Cost per Booked"
-                value={
-                  current.costPerBookedJob
-                    ? formatCurrency(current.costPerBookedJob, true)
-                    : "—"
-                }
-                current={current.costPerBookedJob}
-                previous={previous.costPerBookedJob}
-                invertDelta
-                sparkline={sparks.costPerBookedJob}
-                hint="spend / booked"
-                tooltip={METRIC_DEFS.costPerBookedJob}
-              />
-              <KpiCard
-                label="Sold Jobs"
-                value={formatInt(current.soldJobs)}
-                current={current.soldJobs}
-                previous={previous.soldJobs}
-                sparkline={sparks.sold}
-                tooltip={METRIC_DEFS.soldJobs}
-              />
-              <KpiCard
-                label="Sales Revenue"
-                value={formatCurrency(current.sales)}
-                current={current.sales}
-                previous={previous.sales}
-                sparkline={sparks.sales}
-                tooltip={METRIC_DEFS.salesRevenue}
-              />
-            </div>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-4 xl:grid-cols-7">
-              <KpiCard
-                label="Spend on Revenue"
-                value={
-                  current.spendOnRevenue
-                    ? formatPercent(current.spendOnRevenue)
-                    : "—"
-                }
-                current={current.spendOnRevenue}
-                previous={previous.spendOnRevenue}
-                invertDelta
-                sparkline={sparks.spendOnRevenue}
-                hint="Lower is better"
-                tooltip={METRIC_DEFS.spendOnRevenue}
-              />
-              <KpiCard
-                label="CTR"
-                value={current.ctr ? formatPercent(current.ctr) : "—"}
-                current={current.ctr}
-                previous={previous.ctr}
-                sparkline={sparks.ctr}
-                tooltip={METRIC_DEFS.ctr}
-              />
-              <KpiCard
-                label="Lead Rate"
-                value={
-                  current.leadRate ? formatPercent(current.leadRate) : "—"
-                }
-                current={current.leadRate}
-                previous={previous.leadRate}
-                sparkline={sparks.leadRate}
-                hint="leads / clicks"
-                tooltip={METRIC_DEFS.leadRate}
-              />
-              <KpiCard
-                label="Book Rate"
-                value={
-                  current.bookRate ? formatPercent(current.bookRate) : "—"
-                }
-                current={current.bookRate}
-                previous={previous.bookRate}
-                sparkline={sparks.bookRate}
-                hint="booked / leads"
-                tooltip={METRIC_DEFS.bookRate}
-              />
-              <KpiCard
-                label="Show Rate"
-                value={
-                  current.showRate ? formatPercent(current.showRate) : "—"
-                }
-                current={current.showRate}
-                previous={previous.showRate}
-                sparkline={sparks.showRate}
-                hint="completed / booked"
-                tooltip={METRIC_DEFS.showRate}
-              />
-              <KpiCard
-                label="Close Rate"
-                value={
-                  current.closeRate ? formatPercent(current.closeRate) : "—"
-                }
-                current={current.closeRate}
-                previous={previous.closeRate}
-                sparkline={sparks.closeRate}
-                hint="sold / booked"
-                tooltip={METRIC_DEFS.closeRate}
-              />
-              <KpiCard
-                label="Cancellation Rate"
-                value={
-                  current.cancellationRate
-                    ? formatPercent(current.cancellationRate)
-                    : "—"
-                }
-                current={current.cancellationRate}
-                previous={previous.cancellationRate}
-                invertDelta
-                sparkline={sparks.cancellationRate}
-                hint="of all bookings"
-                tooltip={METRIC_DEFS.cancellationRate}
-                goalChip={goalChip(
-                  "cancelRate",
-                  current.cancellationRate * 100,
-                  targets.cancelTarget,
-                )}
-              />
-            </div>
-          </section>
+      <div
+        style={{
+          padding: "20px 28px 32px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 20,
+        }}
+      >
+        {anomalies.length > 0 ? <AlertsStrip anomalies={anomalies} /> : null}
+        {sliceData.map((s, i) => (
+          <SliceContent
+            key={s.slice.key}
+            sliceLabel={slices.length > 1 ? s.slice.label : null}
+            current={s.current}
+            previous={s.previous}
+            revenueSpark={s.revenueSpark}
+            spendSpark={s.spendSpark}
+            trend={s.trend}
+            funnel={s.funnel}
+            cancelDual={s.cancelDual}
+            dowAvg={s.dowAvg}
+            roasTarget={targets.roasTarget ?? 5}
+            isFirst={i === 0}
+          />
         ))}
-
-        <section
-          aria-label="Performance over time"
-          className="flex flex-col gap-3"
-        >
-          <div className="flex flex-wrap items-baseline justify-between gap-3">
-            <SectionHeader
-              title="Performance Over Time"
-              subtitle={
-                slices.length > 1
-                  ? `${slices.length} ${slices.length === 1 ? "view" : "views"} · stacked`
-                  : "All times America/Chicago"
-              }
-            />
-            <PivotCustomize
-              columns={pivotPeriods.map((p) => ({ key: p.key, label: p.label }))}
-              visibleRowKeys={pivotRowKeys}
-              visibleColKeys={pivotColKeys}
-              onChangeRows={setPivotRowKeys}
-              onChangeCols={setPivotColKeys}
-            />
-          </div>
-          <div className="flex flex-col gap-4">
-            {sliceData.map(({ slice, pivotValues }) => (
-              <PivotTable
-                key={`pivot-${slice.key}`}
-                periods={pivotPeriods}
-                values={pivotValues}
-                caption={slices.length > 1 ? slice.label : undefined}
-                tone={slices.length > 1 ? toneForLabel(slice.label) : "neutral"}
-                visibleRowKeys={pivotRowKeys}
-                visibleColKeys={pivotColKeys}
-              />
-            ))}
-          </div>
-          {targets.cplTarget != null ||
-          targets.roasTarget != null ||
-          targets.cancelTarget != null ? (
-            <p className="text-[11px] text-[color:var(--color-text-tertiary)]">
-              Goals · CPL{" "}
-              {targets.cplTarget != null ? `$${targets.cplTarget}` : "—"} ·
-              ROAS {targets.roasTarget != null ? `${targets.roasTarget}x` : "—"}{" "}
-              · Cancel{" "}
-              {targets.cancelTarget != null
-                ? `<${targets.cancelTarget}%`
-                : "—"}{" "}
-              · set via URL <code className="font-mono">?cplTarget=80</code>
-            </p>
-          ) : null}
-        </section>
-
-        <section aria-label="Trends" className="flex flex-col gap-4">
-          <SectionHeader title="Trends" />
-          {sliceData.map(
-            ({ slice, trend, dowSeries, funnel, weeklyAll, monthlyAll }) => (
-              <div key={`trends-${slice.key}`} className="flex flex-col gap-4">
-                {slices.length > 1 ? (
-                  <SliceHeader label={slice.label} subtle />
-                ) : null}
-                <ChartCard
-                  title="Daily Spend vs Revenue"
-                  caption={`${trendDates[0]} → ${last30Range.endStr} · adjustable window`}
-                >
-                  <DailyTrendChart data={trend} />
-                </ChartCard>
-                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                  <ChartCard
-                    title="Conversion Funnel"
-                    caption={`${period.current.startStr} → ${period.current.endStr}`}
-                  >
-                    <FunnelChart metrics={funnel} />
-                  </ChartCard>
-                  <ChartCard
-                    title="Cancellation Rate"
-                    caption="Current vs previous"
-                  >
-                    <CancellationRateChart
-                      weekly={weeklyAll}
-                      monthly={monthlyAll}
-                    />
-                  </ChartCard>
-                </div>
-                <ChartCard title="By Day of Week" caption="Trailing 30 days">
-                  <DayOfWeekChart rows={dowSeries} />
-                </ChartCard>
-              </div>
-            ),
-          )}
-        </section>
       </div>
-    </main>
+    </>
   );
 }
 
-function sameSet(a: string[], b: string[]): boolean {
-  if (a.length !== b.length) return false;
-  for (const x of a) if (!b.includes(x)) return false;
-  return true;
-}
+/* ───────────────────────────── Slice block ───────────────────────────── */
 
-function SectionHeader({
-  title,
-  subtitle,
+function SliceContent({
+  sliceLabel,
+  current,
+  previous,
+  revenueSpark,
+  spendSpark,
+  trend,
+  funnel,
+  cancelDual,
+  dowAvg,
+  roasTarget,
 }: {
-  title: string;
-  subtitle?: string;
+  sliceLabel: string | null;
+  current: OverviewKpiTotals;
+  previous: OverviewKpiTotals;
+  revenueSpark: number[];
+  spendSpark: number[];
+  trend: SpendRevenuePoint[];
+  funnel: { impressions: number; linkClicks: number; leads: number; bookedJobs: number; soldJobs: number };
+  cancelDual: DualLinePoint[];
+  dowAvg: { day: string; value: number }[];
+  roasTarget: number;
+  isFirst: boolean;
 }) {
+  const roas = current.spend > 0 ? current.sales / current.spend : 0;
+  const avgSale = current.soldJobs > 0 ? current.sales / current.soldJobs : 0;
+  const spendOnRev = current.sales > 0 ? (current.spend / current.sales) * 100 : null;
+
+  const d = (curr: number, prev: number) => pctChange(curr, prev) * 100;
+
   return (
-    <div className="flex items-baseline justify-between">
-      <h2
-        className="font-display text-[color:var(--color-text-primary)]"
-        style={{ fontSize: 18, letterSpacing: "0.06em" }}
-      >
-        {title}
-      </h2>
-      {subtitle ? (
-        <span className="text-[12px] text-[color:var(--color-text-tertiary)] tabular-nums">
-          {subtitle}
-        </span>
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      {sliceLabel ? (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            paddingTop: 4,
+          }}
+        >
+          <Eyebrow size={11}>{sliceLabel}</Eyebrow>
+          <span
+            style={{
+              flex: 1,
+              height: 1,
+              background: "var(--color-jbp-hairline)",
+            }}
+          />
+        </div>
       ) : null}
+      {/* Hero KPIs */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: 16,
+        }}
+      >
+        <HeroKpi
+          label="Sales Revenue"
+          value={formatCompactMoney(current.sales)}
+          delta={d(current.sales, previous.sales)}
+          spark={revenueSpark}
+          sub={`${roas.toFixed(1)}x ROAS · ${formatCurrency(avgSale)} avg sale`}
+          accent
+        />
+        <HeroKpi
+          label="Spend"
+          value={formatCurrency(current.spend)}
+          delta={d(current.spend, previous.spend)}
+          invertDelta
+          spark={spendSpark}
+          sub={`${formatCurrency(current.costPerLead)} per lead`}
+        />
+      </div>
+
+      {/* Performance over time — 6-up volume + cost */}
+      <Card>
+        <CardHeader eyebrow="Performance over time" title="The full picture" />
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(6, 1fr)",
+            borderTop: "1px solid var(--color-jbp-hairline)",
+          }}
+        >
+          <Metric
+            label="Leads"
+            value={formatInt(current.leads)}
+            delta={d(current.leads, previous.leads)}
+          />
+          <Metric
+            label="Cost / Lead"
+            value={
+              current.costPerLead > 0
+                ? formatCurrency(current.costPerLead, true)
+                : "—"
+            }
+            delta={d(current.costPerLead, previous.costPerLead)}
+            invertDelta
+          />
+          <Metric
+            label="Booked Jobs"
+            value={formatInt(current.bookedJobs)}
+            delta={d(current.bookedJobs, previous.bookedJobs)}
+            hero
+          />
+          <Metric
+            label="Cost / Booked"
+            value={
+              current.costPerBookedJob > 0
+                ? formatCurrency(current.costPerBookedJob, true)
+                : "—"
+            }
+            delta={d(current.costPerBookedJob, previous.costPerBookedJob)}
+            invertDelta
+          />
+          <Metric
+            label="Spend / Revenue"
+            value={spendOnRev != null ? `${spendOnRev.toFixed(1)}%` : "—"}
+            delta={d(current.spendOnRevenue, previous.spendOnRevenue)}
+            invertDelta
+          />
+          <Metric
+            label="Avg Sale"
+            value={avgSale > 0 ? formatCompactMoney(avgSale) : "—"}
+            last
+          />
+        </div>
+      </Card>
+
+      {/* Trends */}
+      <Card>
+        <CardHeader
+          eyebrow="Trends"
+          title="Daily Spend vs Revenue"
+          sub="last 30 days · revenue attributed by close date"
+          right={
+            <ChartLegend
+              items={[
+                { color: "var(--color-jbp-red)", label: "Spend", style: "block" },
+                { color: "var(--color-jbp-navy)", label: "Revenue", style: "line" },
+              ]}
+            />
+          }
+        />
+        <div style={{ padding: "20px 16px 8px" }}>
+          <SpendRevenueChart data={trend} />
+        </div>
+      </Card>
+
+      {/* Conversion rates — 6-up */}
+      <Card>
+        <CardHeader
+          eyebrow="Conversion rates"
+          title="The funnel in percentages"
+        />
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(6, 1fr)",
+          }}
+        >
+          <Metric
+            label="CTR"
+            value={current.ctr ? formatPercent(current.ctr) : "—"}
+            delta={d(current.ctr, previous.ctr)}
+            compact
+          />
+          <Metric
+            label="Lead Rate"
+            value={current.leadRate ? formatPercent(current.leadRate) : "—"}
+            delta={d(current.leadRate, previous.leadRate)}
+            compact
+          />
+          <Metric
+            label="Book Rate"
+            value={current.bookRate ? formatPercent(current.bookRate) : "—"}
+            delta={d(current.bookRate, previous.bookRate)}
+            compact
+          />
+          <Metric
+            label="Show Rate"
+            value={current.showRate ? formatPercent(current.showRate) : "—"}
+            delta={d(current.showRate, previous.showRate)}
+            compact
+          />
+          <Metric
+            label="Close Rate"
+            value={current.closeRate ? formatPercent(current.closeRate) : "—"}
+            delta={d(current.closeRate, previous.closeRate)}
+            compact
+          />
+          <Metric
+            label="Cancel Rate"
+            value={
+              current.cancellationRate
+                ? formatPercent(current.cancellationRate)
+                : "—"
+            }
+            delta={d(current.cancellationRate, previous.cancellationRate)}
+            invertDelta
+            compact
+            last
+          />
+        </div>
+      </Card>
+
+      {/* Funnel + ROAS sidebar */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "2fr 1fr",
+          gap: 16,
+        }}
+      >
+        <Card>
+          <CardHeader
+            eyebrow="Funnel"
+            title={`${formatCompactInt(funnel.impressions)} impressions → ${funnel.soldJobs} sold`}
+          />
+          <div style={{ padding: 20 }}>
+            <HorizontalFunnel
+              stages={[
+                { key: "impressions", label: "Impressions", value: funnel.impressions },
+                { key: "clicks", label: "Link Clicks", value: funnel.linkClicks, rateOf: "impressions" },
+                { key: "leads", label: "Leads", value: funnel.leads, rateOf: "clicks" },
+                { key: "booked", label: "Booked", value: funnel.bookedJobs, rateOf: "leads" },
+                { key: "sold", label: "Sold", value: funnel.soldJobs, rateOf: "booked" },
+              ]}
+              values={{
+                impressions: funnel.impressions,
+                clicks: funnel.linkClicks,
+                leads: funnel.leads,
+                booked: funnel.bookedJobs,
+                sold: funnel.soldJobs,
+              }}
+            />
+          </div>
+        </Card>
+        <Card>
+          <CardHeader
+            eyebrow="Return on ad spend"
+            title={`${roas.toFixed(1)}x ROAS`}
+          />
+          <div
+            style={{
+              padding: 20,
+              display: "flex",
+              flexDirection: "column",
+              gap: 16,
+            }}
+          >
+            <RoasMeter value={roas} target={roasTarget} />
+            <div
+              style={{
+                borderTop: "1px solid var(--color-jbp-hairline)",
+                paddingTop: 14,
+                display: "flex",
+                flexDirection: "column",
+                gap: 8,
+              }}
+            >
+              <RoasRow label="Spend" value={formatCurrency(current.spend)} />
+              <RoasRow
+                label="Revenue"
+                value={formatCurrency(current.sales)}
+                accent
+              />
+              <RoasRow
+                label="Avg sale"
+                value={avgSale > 0 ? formatCurrency(avgSale) : "—"}
+              />
+              <RoasRow
+                label="Booked jobs"
+                value={formatInt(current.bookedJobs)}
+              />
+            </div>
+          </div>
+        </Card>
+      </div>
+
+      {/* Cancellation + Day of week */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr",
+          gap: 16,
+        }}
+      >
+        <Card>
+          <CardHeader
+            eyebrow="Cancellation rate"
+            title="Weekly · 8w trail"
+          />
+          <div style={{ padding: "16px 20px 8px" }}>
+            <DualLineChart data={cancelDual} />
+            <div
+              style={{
+                display: "flex",
+                gap: 16,
+                marginTop: 4,
+                fontSize: 11,
+                color: "var(--color-jbp-text-2)",
+                fontFamily: "var(--font-mono)",
+              }}
+            >
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <span
+                  style={{
+                    display: "inline-block",
+                    width: 14,
+                    height: 2,
+                    background: "var(--color-jbp-red)",
+                  }}
+                />
+                Current
+              </span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <span
+                  style={{
+                    display: "inline-block",
+                    width: 14,
+                    height: 0,
+                    borderTop:
+                      "1.5px dashed var(--color-jbp-text-2)",
+                  }}
+                />
+                Previous 8w
+              </span>
+            </div>
+          </div>
+        </Card>
+        <Card>
+          <CardHeader
+            eyebrow="Day of week"
+            title="Avg leads · trailing 30d"
+            sub={dowBestDay(dowAvg)}
+          />
+          <div style={{ padding: 20 }}>
+            <DayOfWeekBars data={dowAvg} />
+          </div>
+        </Card>
+      </div>
     </div>
   );
 }
 
-function SliceHeader({ label, subtle }: { label: string; subtle?: boolean }) {
+/* ───────────────────────────── Alerts strip ───────────────────────────── */
+
+function AlertsStrip({ anomalies }: { anomalies: Anomaly[] }) {
+  // Top 3 alerts by absolute change. Eligible metrics in the prototype's
+  // headline: spend / lead rate / cancellation rate. We pick the loudest.
+  const top = anomalies.slice(0, 3);
   return (
-    <div className="flex items-center gap-3">
+    <div
+      style={{
+        display: "flex",
+        alignItems: "stretch",
+        background: "var(--color-jbp-white)",
+        border: "1px solid var(--color-jbp-hairline)",
+        borderLeft: "3px solid var(--color-jbp-red)",
+      }}
+    >
+      <div
+        style={{
+          padding: "12px 16px",
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          borderRight: "1px solid var(--color-jbp-hairline)",
+          minWidth: 200,
+        }}
+      >
+        <span
+          style={{
+            width: 24,
+            height: 24,
+            background: "var(--color-jbp-red)",
+            color: "#fff",
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontWeight: 800,
+            fontSize: 14,
+            fontFamily: "var(--font-display)",
+          }}
+        >
+          !
+        </span>
+        <div>
+          <div
+            style={{
+              fontSize: 10,
+              fontWeight: 800,
+              letterSpacing: 1.5,
+              textTransform: "uppercase",
+              color: "var(--color-jbp-red)",
+            }}
+          >
+            Heads up
+          </div>
+          <div
+            style={{
+              fontSize: 10,
+              fontFamily: "var(--font-mono)",
+              color: "var(--color-jbp-text-3)",
+              letterSpacing: 0.4,
+            }}
+          >
+            last 7d vs prior 7d
+          </div>
+        </div>
+      </div>
+      <div style={{ display: "flex", flex: 1, alignItems: "center" }}>
+        {top.map((a, i) => (
+          <div
+            key={a.metric}
+            style={{
+              flex: 1,
+              padding: "10px 16px",
+              borderRight:
+                i < top.length - 1
+                  ? "1px solid var(--color-jbp-hairline)"
+                  : "none",
+              display: "flex",
+              flexDirection: "column",
+              gap: 3,
+            }}
+          >
+            <div
+              style={{
+                fontSize: 11,
+                color: "var(--color-jbp-text-2)",
+                fontFamily: "var(--font-mono)",
+                textTransform: "uppercase",
+                letterSpacing: 0.6,
+              }}
+            >
+              {a.label}
+            </div>
+            <span
+              style={{
+                fontSize: 16,
+                fontWeight: 800,
+                fontFamily: "var(--font-display)",
+                color: a.bad ? "var(--color-jbp-bad)" : "var(--color-jbp-good)",
+                fontVariantNumeric: "tabular-nums",
+                letterSpacing: -0.3,
+              }}
+            >
+              {a.direction === "up" ? "↑" : "↓"} {Math.abs(a.change * 100).toFixed(0)}%
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ───────────────────────────── Helpers ───────────────────────────── */
+
+function ChartLegend({
+  items,
+}: {
+  items: { color: string; label: string; style: "line" | "block" }[];
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        gap: 14,
+        fontSize: 11,
+        color: "var(--color-jbp-text-2)",
+        fontFamily: "var(--font-mono)",
+        textTransform: "uppercase",
+        letterSpacing: 0.5,
+      }}
+    >
+      {items.map((it) => (
+        <span
+          key={it.label}
+          style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+        >
+          <span
+            style={{
+              display: "inline-block",
+              width: 14,
+              height: it.style === "line" ? 2 : 10,
+              background: it.color,
+            }}
+          />
+          {it.label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function RoasRow({
+  label,
+  value,
+  accent = false,
+}: {
+  label: string;
+  value: string;
+  accent?: boolean;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "baseline",
+        fontSize: 12,
+      }}
+    >
       <span
-        className={
-          subtle
-            ? "text-[12px] font-semibold uppercase tracking-[0.08em] text-[color:var(--color-text-secondary)]"
-            : "font-display text-[color:var(--color-text-primary)]"
-        }
-        style={subtle ? undefined : { fontSize: 15, letterSpacing: "0.06em" }}
+        style={{
+          color: "var(--color-jbp-text-2)",
+          fontFamily: "var(--font-mono)",
+          textTransform: "uppercase",
+          letterSpacing: 0.6,
+          fontSize: 10,
+        }}
       >
         {label}
       </span>
-      <span className="h-[1px] flex-1 bg-[color:var(--color-border-subtle)]" />
+      <span
+        style={{
+          fontWeight: 700,
+          color: accent ? "var(--color-jbp-red)" : "var(--color-jbp-text)",
+          fontVariantNumeric: "tabular-nums",
+          fontFamily: "var(--font-display)",
+          letterSpacing: -0.2,
+        }}
+      >
+        {value}
+      </span>
     </div>
   );
 }
 
-function ChartCard({
-  title,
-  caption,
-  children,
-}: {
-  title: string;
-  caption?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex flex-col gap-2 rounded-lg border border-[color:var(--color-border-subtle)] bg-white p-4 transition-shadow hover:shadow-[0_4px_16px_rgba(26,15,11,0.06)]">
-      <div className="flex items-baseline justify-between">
-        <h3 className="text-[14px] font-semibold text-[color:var(--color-text-primary)]">
-          {title}
-        </h3>
-        {caption ? (
-          <span className="text-[11px] tabular-nums text-[color:var(--color-text-tertiary)]">
-            {caption}
-          </span>
-        ) : null}
-      </div>
-      {children}
-    </div>
+/** Average a daily KPI series by weekday — returns 7 buckets in Mon–Sun order. */
+function aggregateDayOfWeek(
+  rows: { date: string; leads: number }[],
+): { day: string; value: number }[] {
+  const labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const sums = [0, 0, 0, 0, 0, 0, 0];
+  const counts = [0, 0, 0, 0, 0, 0, 0];
+  for (const r of rows) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(r.date)) continue;
+    const d = new Date(`${r.date}T12:00:00Z`);
+    if (Number.isNaN(d.getTime())) continue;
+    const dow = (d.getUTCDay() + 6) % 7; // Mon=0..Sun=6
+    sums[dow] += r.leads;
+    counts[dow] += 1;
+  }
+  return labels.map((day, i) => ({
+    day,
+    value: counts[i] > 0 ? sums[i] / counts[i] : 0,
+  }));
+}
+
+function dowBestDay(rows: { day: string; value: number }[]): string {
+  const best = rows.reduce(
+    (acc, r) => (r.value > acc.value ? r : acc),
+    rows[0] ?? { day: "—", value: 0 },
   );
+  if (!best || best.value === 0) return "no leads in window";
+  return `best day: ${best.day} · ${best.value.toFixed(1)} leads/day`;
 }
