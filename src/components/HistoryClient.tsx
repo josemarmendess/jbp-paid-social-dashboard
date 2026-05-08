@@ -190,7 +190,57 @@ function HistorySlice({
       </div>
 
       <Card>
-        <CardHeader eyebrow="Month over month" title="The long view" />
+        <CardHeader
+          eyebrow="Month over month"
+          title="Spend · Revenue · Spend/Revenue %"
+          right={
+            <div
+              style={{
+                display: "flex",
+                gap: 14,
+                fontSize: 11,
+                color: "var(--color-jbp-text-2)",
+                fontFamily: "var(--font-mono)",
+                textTransform: "uppercase",
+                letterSpacing: 0.5,
+              }}
+            >
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <span
+                  style={{
+                    display: "inline-block",
+                    width: 10,
+                    height: 10,
+                    background: "var(--color-jbp-red)",
+                  }}
+                />
+                Spend
+              </span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <span
+                  style={{
+                    display: "inline-block",
+                    width: 10,
+                    height: 10,
+                    background: "var(--color-jbp-navy)",
+                  }}
+                />
+                Revenue
+              </span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <span
+                  style={{
+                    display: "inline-block",
+                    width: 14,
+                    height: 2,
+                    background: "var(--color-jbp-ink-soft)",
+                  }}
+                />
+                Spend/Rev %
+              </span>
+            </div>
+          }
+        />
         <div style={{ padding: "24px 20px 12px" }}>
           <HistoryBars rows={rows} maxSpend={maxSpend} maxRev={maxRev} />
         </div>
@@ -323,73 +373,155 @@ function HistoryBars({
   maxSpend: number;
   maxRev: number;
 }) {
+  // SVG-based MoM chart so width/height are deterministic regardless of
+  // flex hierarchy. Three things per month, per the redesign brief:
+  //   1) Spend bar (red)
+  //   2) Revenue bar (navy)
+  //   3) Spend / Revenue ratio line (ink, secondary right axis)
+  if (rows.length === 0) return null;
+  const w = 880;
+  const h = 240;
+  const padL = 56;
+  const padR = 64;
+  const padT = 20;
+  const padB = 36;
+  const innerW = w - padL - padR;
+  const innerH = h - padT - padB;
+  const maxBar = Math.max(maxSpend, maxRev, 1);
+  const ratios = rows.map((r) =>
+    r.sales > 0 ? Math.min((r.spend / r.sales) * 100, 200) : null,
+  );
+  const validRatios = ratios.filter((v): v is number => v != null);
+  const maxRatio = Math.max(100, ...validRatios) * 1.1;
+  const stepX = innerW / rows.length;
+  const barW = (stepX - 8) / 2;
+  const barTicks = [0, maxBar * 0.25, maxBar * 0.5, maxBar * 0.75, maxBar];
+  const ratioTicks = [0, maxRatio * 0.5, maxRatio];
+
+  const linePts = rows
+    .map((_, i) => {
+      const r = ratios[i];
+      if (r == null) return null;
+      const x = padL + i * stepX + stepX / 2;
+      const y = padT + innerH - (r / maxRatio) * innerH;
+      return { x, y };
+    })
+    .filter((p): p is { x: number; y: number } => p !== null);
+  const linePath = linePts
+    .map((p, i) => (i === 0 ? "M" : "L") + p.x.toFixed(1) + "," + p.y.toFixed(1))
+    .join(" ");
+
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "flex-end",
-        gap: 10,
-        height: 220,
-        padding: "0 4px",
-      }}
+    <svg
+      width="100%"
+      viewBox={`0 0 ${w} ${h}`}
+      style={{ display: "block", overflow: "visible" }}
     >
-      {rows.map((d) => {
-        const spendH = (d.spend / maxSpend) * 100;
-        const revH = (d.sales / maxRev) * 100;
+      {/* Left ($) axis grid */}
+      {barTicks.map((t, i) => {
+        const y = padT + innerH - (t / maxBar) * innerH;
         return (
-          <div
-            key={d.month}
-            style={{
-              flex: 1,
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: 6,
-            }}
-          >
-            <div
-              style={{
-                flex: 1,
-                width: "100%",
-                display: "flex",
-                justifyContent: "center",
-                alignItems: "flex-end",
-                gap: 3,
-              }}
+          <g key={`l-${i}`}>
+            <line
+              x1={padL}
+              y1={y}
+              x2={padL + innerW}
+              y2={y}
+              stroke="var(--color-jbp-hairline)"
+            />
+            <text
+              x={padL - 8}
+              y={y + 3}
+              fontSize="10"
+              fill="var(--color-jbp-text-3)"
+              textAnchor="end"
+              fontFamily="var(--font-mono)"
             >
-              <div
-                style={{
-                  width: 12,
-                  height: spendH + "%",
-                  background: "var(--color-jbp-red)",
-                  opacity: 0.85,
-                }}
-                title={`Spend ${formatCompactMoney(d.spend)}`}
-              />
-              <div
-                style={{
-                  width: 12,
-                  height: revH + "%",
-                  background: "var(--color-jbp-navy)",
-                }}
-                title={`Revenue ${formatCompactMoney(d.sales)}`}
-              />
-            </div>
-            <div
-              style={{
-                fontSize: 10,
-                fontFamily: "var(--font-mono)",
-                color: "var(--color-jbp-text-3)",
-                transform: "rotate(-30deg)",
-                transformOrigin: "center",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {d.month}
-            </div>
-          </div>
+              {formatCompactMoney(t)}
+            </text>
+          </g>
         );
       })}
-    </div>
+      {/* Right (%) axis labels */}
+      {ratioTicks.map((t, i) => {
+        const y = padT + innerH - (t / maxRatio) * innerH;
+        return (
+          <text
+            key={`r-${i}`}
+            x={padL + innerW + 8}
+            y={y + 3}
+            fontSize="10"
+            fill="var(--color-jbp-ink-soft)"
+            textAnchor="start"
+            fontFamily="var(--font-mono)"
+          >
+            {Math.round(t)}%
+          </text>
+        );
+      })}
+      {/* Bars */}
+      {rows.map((d, i) => {
+        const groupX = padL + i * stepX + 4;
+        const sH = (d.spend / maxBar) * innerH;
+        const rH = (d.sales / maxBar) * innerH;
+        return (
+          <g key={d.month}>
+            <rect
+              x={groupX}
+              y={padT + innerH - sH}
+              width={barW}
+              height={sH}
+              fill="var(--color-jbp-red)"
+              fillOpacity="0.85"
+            >
+              <title>
+                Spend {formatCompactMoney(d.spend)}
+              </title>
+            </rect>
+            <rect
+              x={groupX + barW + 2}
+              y={padT + innerH - rH}
+              width={barW}
+              height={rH}
+              fill="var(--color-jbp-navy)"
+            >
+              <title>
+                Revenue {formatCompactMoney(d.sales)}
+              </title>
+            </rect>
+            <text
+              x={groupX + barW + 1}
+              y={h - 14}
+              fontSize="10"
+              fill="var(--color-jbp-text-3)"
+              textAnchor="middle"
+              fontFamily="var(--font-mono)"
+            >
+              {d.month.slice(2)}
+            </text>
+          </g>
+        );
+      })}
+      {/* Spend / Revenue ratio line */}
+      <path
+        d={linePath}
+        stroke="var(--color-jbp-ink-soft)"
+        strokeWidth="1.5"
+        fill="none"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      {linePts.map((p, i) => (
+        <circle
+          key={`p-${i}`}
+          cx={p.x}
+          cy={p.y}
+          r="2.5"
+          fill="var(--color-jbp-ink-soft)"
+          stroke="#fff"
+          strokeWidth="1.5"
+        />
+      ))}
+    </svg>
   );
 }

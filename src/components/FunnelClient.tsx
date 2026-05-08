@@ -13,6 +13,7 @@ import { usePaidSocialData } from "@/components/PaidSocialDataProvider";
 import {
   computeFunnel,
   computeOverviewKpis,
+  dailyKpiSeries,
   type FunnelMetrics,
   type OverviewKpiTotals,
 } from "@/lib/aggregate";
@@ -20,6 +21,7 @@ import { getServiceSlices, type ServiceView } from "@/lib/buFilter";
 import { appendCommonFilters, replaceQuery } from "@/lib/clientUrlState";
 import { getPeriod } from "@/lib/dateRange";
 import { formatCompactInt, pctChange } from "@/lib/format";
+import { rollingDaysList } from "@/lib/periods";
 import type { DateRangePreset } from "@/lib/types";
 
 interface FunnelClientProps {
@@ -59,6 +61,7 @@ export function FunnelClient({
     [preset, customStart, customEnd],
   );
   const slices = useMemo(() => getServiceSlices(bu, view), [bu, view]);
+  const trendDates30 = useMemo(() => rollingDaysList(30), []);
 
   const sliceData = useMemo(() => {
     if (!data) return [];
@@ -81,9 +84,23 @@ export function FunnelClient({
         period.previous,
         slice.bu,
       );
-      return { slice, funnel, current, previous };
+      // 30-day per-day funnel rate series for the inline trend cards.
+      const rate30Rows = dailyKpiSeries(
+        data.meta_insights,
+        data.servicetitan_social_leads,
+        trendDates30,
+        slice.bu,
+      );
+      const safe = (n: number, d: number) => (d > 0 ? n / d : 0);
+      const rateSparks = {
+        ctr: rate30Rows.map((r) => safe(r.linkClicks, r.impressions)),
+        leadRate: rate30Rows.map((r) => safe(r.leads, r.linkClicks)),
+        bookRate: rate30Rows.map((r) => safe(r.bookedJobs, r.leads)),
+        closeRate: rate30Rows.map((r) => safe(r.soldJobs, r.bookedJobs)),
+      };
+      return { slice, funnel, current, previous, rateSparks };
     });
-  }, [data, slices, period]);
+  }, [data, slices, period, trendDates30]);
 
   if (!data) {
     return (
@@ -129,13 +146,14 @@ export function FunnelClient({
           gap: 20,
         }}
       >
-        {sliceData.map(({ slice, funnel, current, previous }) => (
+        {sliceData.map(({ slice, funnel, current, previous, rateSparks }) => (
           <FunnelSlice
             key={slice.key}
             sliceLabel={slices.length > 1 ? slice.label : null}
             funnel={funnel}
             current={current}
             previous={previous}
+            rateSparks={rateSparks}
           />
         ))}
       </div>
@@ -148,11 +166,18 @@ function FunnelSlice({
   funnel,
   current,
   previous,
+  rateSparks,
 }: {
   sliceLabel: string | null;
   funnel: FunnelMetrics;
   current: OverviewKpiTotals;
   previous: OverviewKpiTotals;
+  rateSparks: {
+    ctr: number[];
+    leadRate: number[];
+    bookRate: number[];
+    closeRate: number[];
+  };
 }) {
   const e2e =
     funnel.impressions > 0
@@ -344,25 +369,33 @@ function FunnelSlice({
         <RateCard
           label="Click-through Rate"
           value={current.ctr}
+          previous={previous.ctr}
           delta={d(current.ctr, previous.ctr)}
+          spark={rateSparks.ctr}
           sub={`${formatCompactInt(funnel.linkClicks)} of ${formatCompactInt(funnel.impressions)}`}
         />
         <RateCard
           label="Lead Rate"
           value={current.leadRate}
+          previous={previous.leadRate}
           delta={d(current.leadRate, previous.leadRate)}
+          spark={rateSparks.leadRate}
           sub={`${funnel.leads} of ${formatCompactInt(funnel.linkClicks)}`}
         />
         <RateCard
           label="Book Rate"
           value={current.bookRate}
+          previous={previous.bookRate}
           delta={d(current.bookRate, previous.bookRate)}
+          spark={rateSparks.bookRate}
           sub={`${funnel.bookedJobs} of ${funnel.leads}`}
         />
         <RateCard
           label="Close Rate"
           value={current.closeRate}
+          previous={previous.closeRate}
           delta={d(current.closeRate, previous.closeRate)}
+          spark={rateSparks.closeRate}
           sub={`${funnel.soldJobs} of ${funnel.bookedJobs}`}
         />
       </div>
@@ -381,22 +414,31 @@ function FunnelSlice({
 function RateCard({
   label,
   value,
+  previous,
   delta,
+  spark,
   sub,
 }: {
   label: string;
   /** Ratio 0-1; we render as percent. */
   value: number;
+  /** Prior period rate, 0-1. */
+  previous: number;
   delta: number;
+  spark: number[];
   sub: string;
 }) {
   const pct = value * 100;
+  const prevPct = previous * 100;
   return (
     <div
       style={{
         background: "var(--color-jbp-white)",
         border: "1px solid var(--color-jbp-hairline)",
         padding: "18px 20px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 8,
       }}
     >
       <div
@@ -415,7 +457,6 @@ function RateCard({
           display: "flex",
           alignItems: "baseline",
           gap: 10,
-          marginTop: 4,
         }}
       >
         <span
@@ -436,15 +477,60 @@ function RateCard({
       </div>
       <div
         style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "baseline",
           fontSize: 11,
           fontFamily: "var(--font-mono)",
           color: "var(--color-jbp-text-3)",
-          marginTop: 6,
         }}
       >
-        {sub}
+        <span>{sub}</span>
+        <span style={{ color: "var(--color-jbp-text-2)" }}>
+          prior {prevPct > 0 ? `${prevPct.toFixed(1)}%` : "—"}
+        </span>
       </div>
+      {spark && spark.length > 1 ? (
+        <FunnelSpark values={spark} />
+      ) : null}
     </div>
+  );
+}
+
+function FunnelSpark({ values }: { values: number[] }) {
+  const w = 100;
+  const h = 28;
+  const max = Math.max(...values, 0.0001);
+  const min = Math.min(...values);
+  const range = max - min || 1;
+  const xs = values.map(
+    (_, i) => (i / Math.max(values.length - 1, 1)) * w,
+  );
+  const ys = values.map((v) => h - ((v - min) / range) * (h - 2) - 1);
+  const path =
+    "M " +
+    xs.map((x, i) => `${x.toFixed(1)},${ys[i].toFixed(1)}`).join(" L ");
+  const areaPath = `${path} L ${w.toFixed(1)},${h} L 0,${h} Z`;
+  return (
+    <svg
+      width="100%"
+      height={h}
+      viewBox={`0 0 ${w} ${h}`}
+      preserveAspectRatio="none"
+      style={{ display: "block", marginTop: 4 }}
+      aria-hidden="true"
+    >
+      <path d={areaPath} fill="var(--color-jbp-red)" fillOpacity={0.10} />
+      <path
+        d={path}
+        stroke="var(--color-jbp-red)"
+        strokeWidth="1.5"
+        fill="none"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        vectorEffect="non-scaling-stroke"
+      />
+    </svg>
   );
 }
 

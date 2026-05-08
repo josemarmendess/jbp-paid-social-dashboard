@@ -15,11 +15,7 @@ import { aggregateByZip, type ZipMetrics } from "@/lib/aggregate";
 import { getServiceSlices, type ServiceView } from "@/lib/buFilter";
 import { appendCommonFilters, replaceQuery } from "@/lib/clientUrlState";
 import { getPeriod } from "@/lib/dateRange";
-import {
-  formatCompactMoney,
-  formatCurrency,
-  formatInt,
-} from "@/lib/format";
+import { formatCompactMoney, formatInt } from "@/lib/format";
 import type { DateRangePreset } from "@/lib/types";
 
 interface GeographyClientProps {
@@ -251,7 +247,7 @@ function GeographySlice({
                     top: 0,
                   }}
                 >
-                  {["ZIP", "Leads", "Booked", "Revenue", "CPL"].map((h, i) => (
+                  {["ZIP", "Leads", "Booked", "Revenue"].map((h, i) => (
                     <th
                       key={h}
                       style={{
@@ -317,18 +313,6 @@ function GeographySlice({
                       }}
                     >
                       {formatCompactMoney(z.sales)}
-                    </td>
-                    <td
-                      style={{
-                        padding: "10px 12px",
-                        textAlign: "right",
-                        fontFamily: "var(--font-mono)",
-                        fontVariantNumeric: "tabular-nums",
-                      }}
-                    >
-                      {z.allocatedSpend > 0 && z.leads > 0
-                        ? formatCurrency(z.allocatedSpend / z.leads)
-                        : "—"}
                     </td>
                   </tr>
                 ))}
