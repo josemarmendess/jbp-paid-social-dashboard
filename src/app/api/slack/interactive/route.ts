@@ -1,7 +1,7 @@
 import { after } from "next/server";
 import { NextResponse } from "next/server";
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { fetchPaidSocialData } from "@/lib/fetchData";
+import { fetchPaidSocialDataDirect } from "@/lib/fetchData";
 import { renderDailySummaryImage } from "@/lib/reports/renderImage";
 import { DAILY_SUMMARY_DEFAULT_CONFIG } from "@/lib/reportTemplates";
 import {
@@ -133,8 +133,8 @@ export async function POST(req: Request) {
   const approverName = payload.user?.name ?? payload.user?.id ?? "approver";
   after(async () => {
     try {
-      const data = await fetchPaidSocialData();
-      if (!data) throw new Error("fetchPaidSocialData returned null");
+      const data = await fetchPaidSocialDataDirect();
+      if (!data) throw new Error("fetchPaidSocialDataDirect returned null");
 
       const buffer = await renderDailySummaryImage(
         data,

@@ -75,3 +75,41 @@ export async function fetchPaidSocialData(): Promise<PaidSocialPayload | null> {
     return null;
   }
 }
+
+/**
+ * Uncached variant used by the daily cron + Slack interactive endpoint.
+ * The Apps Script payload outgrew Next's 2MB Data Cache ceiling, so the
+ * cached path throws on big responses. These code paths run rarely (once
+ * a day + on Approve clicks) so paying the full Apps Script latency each
+ * time is fine — and we skip the cache write entirely, which keeps the
+ * 2MB limit out of the picture.
+ */
+export async function fetchPaidSocialDataDirect(): Promise<PaidSocialPayload | null> {
+  const baseUrl = process.env.APPS_SCRIPT_URL;
+  const token = process.env.APPS_SCRIPT_TOKEN;
+  if (!baseUrl || !token) {
+    console.warn(
+      "[paid-social] env vars missing (APPS_SCRIPT_URL / APPS_SCRIPT_TOKEN) — returning null.",
+    );
+    return null;
+  }
+  const url = new URL(baseUrl);
+  url.searchParams.set("token", token);
+  try {
+    const res = await fetch(url.toString(), {
+      cache: "no-store",
+      redirect: "follow",
+    });
+    if (!res.ok) {
+      throw new Error(
+        `Apps Script request failed: ${res.status} ${res.statusText}`,
+      );
+    }
+    return (await res.json()) as PaidSocialPayload;
+  } catch (err) {
+    console.warn(
+      `[paid-social-direct] fetch failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return null;
+  }
+}

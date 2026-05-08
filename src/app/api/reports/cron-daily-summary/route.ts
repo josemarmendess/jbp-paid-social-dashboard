@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { fetchPaidSocialData } from "@/lib/fetchData";
+import { fetchPaidSocialDataDirect } from "@/lib/fetchData";
 import { renderDailySummaryImage } from "@/lib/reports/renderImage";
 import { DAILY_SUMMARY_DEFAULT_CONFIG } from "@/lib/reportTemplates";
 import {
@@ -88,10 +88,10 @@ async function run(req: Request) {
     );
   }
 
-  const data = await fetchPaidSocialData();
+  const data = await fetchPaidSocialDataDirect();
   if (!data) {
     return NextResponse.json(
-      { ok: false, error: "fetchPaidSocialData returned null" },
+      { ok: false, error: "fetchPaidSocialDataDirect returned null" },
       { status: 502 },
     );
   }
