@@ -23,14 +23,20 @@ export { DEFAULT_CRON_CONFIG, type CronConfig };
 let clientCache: Redis | null | undefined;
 
 /**
- * Lazily build the Upstash client from env vars. Returns null when
- * UPSTASH_REDIS_REST_URL / TOKEN aren't set (e.g. the user hasn't
- * connected the database yet) so callers can fall through to defaults.
+ * Lazily build the Upstash client from env vars. Vercel's Marketplace
+ * Upstash integration injects the legacy Vercel KV names
+ * (KV_REST_API_URL / KV_REST_API_TOKEN); a manual install of @upstash/redis
+ * uses the upstream names (UPSTASH_REDIS_REST_URL / TOKEN). Accept either.
+ *
+ * Returns null when neither pair is set so callers can fall through to
+ * defaults and the dashboard shows a setup banner.
  */
 function client(): Redis | null {
   if (clientCache !== undefined) return clientCache;
-  const url = process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  const url =
+    process.env.UPSTASH_REDIS_REST_URL ?? process.env.KV_REST_API_URL;
+  const token =
+    process.env.UPSTASH_REDIS_REST_TOKEN ?? process.env.KV_REST_API_TOKEN;
   if (!url || !token) {
     clientCache = null;
     return null;
