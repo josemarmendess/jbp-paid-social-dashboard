@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { ClientPageHeader } from "@/components/ClientPageHeader";
+import { Card, CardHeader, SimpleKpi } from "@/components/design";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { usePaidSocialData } from "@/components/PaidSocialDataProvider";
 import { PerformanceTabs } from "@/components/PerformanceTabs";
@@ -14,6 +15,11 @@ import {
 } from "@/lib/aggregate";
 import { appendCommonFilters, replaceQuery } from "@/lib/clientUrlState";
 import { getPeriod } from "@/lib/dateRange";
+import {
+  formatCompactMoney,
+  formatCurrency,
+  formatInt,
+} from "@/lib/format";
 import { rollingDaysList } from "@/lib/periods";
 import type { DateRangePreset, MetaAdCreativeRow } from "@/lib/types";
 
@@ -51,7 +57,6 @@ export function PerformanceClient({
     () => getPeriod(preset, customStart, customEnd),
     [preset, customStart, customEnd],
   );
-
   const sevenDayDates = useMemo(() => rollingDaysList(7), []);
 
   const ads = useMemo(() => {
@@ -116,11 +121,36 @@ export function PerformanceClient({
     return out;
   }, [data]);
 
+  const totals = useMemo(() => {
+    const totalSpend = campaigns.reduce((s, c) => s + c.spend, 0);
+    const totalLeads = campaigns.reduce((s, c) => s + c.leads, 0);
+    const totalRev = campaigns.reduce((s, c) => s + c.sales, 0);
+    const totalBooked = campaigns.reduce((s, c) => s + c.bookedJobs, 0);
+    const blendedCpl = totalLeads > 0 ? totalSpend / totalLeads : 0;
+    const blendedRoas = totalSpend > 0 ? totalRev / totalSpend : 0;
+    return {
+      totalSpend,
+      totalLeads,
+      totalRev,
+      totalBooked,
+      blendedCpl,
+      blendedRoas,
+      activeCampaigns: campaigns.length,
+    };
+  }, [campaigns]);
+
   if (!data) {
     return (
-      <main className="flex flex-1 flex-col">
+      <main style={{ flex: 1 }}>
         <ErrorBanner message={error ?? "Try refreshing."} />
-        <div className="flex flex-1 items-center justify-center px-6 py-16 text-sm text-[color:var(--color-text-tertiary)]">
+        <div
+          style={{
+            padding: "64px 24px",
+            textAlign: "center",
+            color: "var(--color-jbp-text-3)",
+            fontSize: 13,
+          }}
+        >
           No data available.
         </div>
       </main>
@@ -128,7 +158,7 @@ export function PerformanceClient({
   }
 
   return (
-    <main className="flex flex-1 flex-col">
+    <>
       <ClientPageHeader
         pageTitle="Performance"
         preset={preset}
@@ -144,23 +174,54 @@ export function PerformanceClient({
         onBuChange={setBu}
         showViewToggle={false}
       />
-
-      <div className="mx-auto flex w-full max-w-[1320px] flex-1 flex-col gap-5 px-6 py-6 sm:px-8">
-        <div className="flex items-baseline justify-between">
-          <div className="flex flex-col">
-            <span className="text-[11px] uppercase tracking-[0.08em] text-[color:var(--color-text-tertiary)]">
-              {period.label} · {period.current.startStr} →{" "}
-              {period.current.endStr}
-            </span>
-            <span className="text-[12px] text-[color:var(--color-text-secondary)]">
-              Click a row for details · click an ad thumbnail for the creative
-            </span>
-          </div>
-          <span className="text-[11px] uppercase tracking-[0.08em] text-[color:var(--color-text-tertiary)]">
-            America/Chicago
-          </span>
+      <div
+        style={{
+          padding: "20px 28px 32px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 20,
+        }}
+      >
+        {/* Top totals */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(4, 1fr)",
+            gap: 16,
+          }}
+        >
+          <SimpleKpi
+            label="Active campaigns"
+            value={formatInt(totals.activeCampaigns)}
+            sub={`${period.label.toLowerCase()} window`}
+          />
+          <SimpleKpi
+            label="Total spend"
+            value={formatCurrency(totals.totalSpend)}
+            sub={`${period.current.startStr} → ${period.current.endStr}`}
+          />
+          <SimpleKpi
+            label="Total leads"
+            value={formatInt(totals.totalLeads)}
+            sub={
+              totals.blendedCpl > 0
+                ? `avg ${formatCurrency(totals.blendedCpl)} CPL`
+                : "no leads in window"
+            }
+          />
+          <SimpleKpi
+            label="Attributed revenue"
+            value={formatCompactMoney(totals.totalRev)}
+            sub={
+              totals.blendedRoas > 0
+                ? `${totals.blendedRoas.toFixed(1)}x blended ROAS`
+                : "no revenue yet"
+            }
+            accent
+          />
         </div>
 
+        {/* Campaign / Adset / Ad / BU breakdown — unchanged inner tables. */}
         <PerformanceTabs
           ads={ads}
           campaigns={campaigns}
@@ -169,7 +230,127 @@ export function PerformanceClient({
           sevenDayByAd={sevenDayByAd}
           creativeByAd={creativeByAd}
         />
+
+        {/* Service breakdown bars */}
+        <Card>
+          <CardHeader eyebrow="By service" title="Where the spend is going" />
+          <div style={{ padding: 20 }}>
+            <ServiceBars
+              rows={businessUnitRows.map((r) => ({
+                label: r.businessUnit,
+                spend: r.spend,
+                leads: r.leads,
+                revenue: r.sales,
+              }))}
+              totalSpend={totals.totalSpend}
+            />
+          </div>
+        </Card>
       </div>
-    </main>
+    </>
+  );
+}
+
+function ServiceBars({
+  rows,
+  totalSpend,
+}: {
+  rows: { label: string; spend: number; leads: number; revenue: number }[];
+  totalSpend: number;
+}) {
+  if (rows.length === 0) {
+    return (
+      <div
+        style={{
+          fontSize: 12,
+          color: "var(--color-jbp-text-3)",
+          fontFamily: "var(--font-mono)",
+        }}
+      >
+        no service rows in window
+      </div>
+    );
+  }
+  const colorMap: Record<string, string> = {
+    Bathrooms: "var(--color-jbp-svc-water)",
+    Sewers: "var(--color-jbp-svc-sewer)",
+  };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {rows.map((r) => (
+        <div
+          key={r.label}
+          style={{
+            display: "grid",
+            gridTemplateColumns: "120px 1fr 80px 80px 100px",
+            alignItems: "center",
+            gap: 14,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 12,
+              fontWeight: 700,
+              color: "var(--color-jbp-text)",
+            }}
+          >
+            {r.label}
+          </div>
+          <div
+            style={{
+              position: "relative",
+              height: 22,
+              background: "var(--color-jbp-cream)",
+            }}
+          >
+            <div
+              style={{
+                position: "absolute",
+                inset: "0 auto 0 0",
+                width:
+                  totalSpend > 0
+                    ? `${(r.spend / totalSpend) * 100}%`
+                    : "0%",
+                background: colorMap[r.label] ?? "var(--color-jbp-red)",
+              }}
+            />
+          </div>
+          <div
+            style={{
+              fontSize: 12,
+              fontFamily: "var(--font-mono)",
+              fontWeight: 700,
+              fontVariantNumeric: "tabular-nums",
+              textAlign: "right",
+            }}
+          >
+            {formatCurrency(r.spend)}
+          </div>
+          <div
+            style={{
+              fontSize: 12,
+              fontFamily: "var(--font-mono)",
+              color: "var(--color-jbp-text-2)",
+              fontVariantNumeric: "tabular-nums",
+              textAlign: "right",
+            }}
+          >
+            {r.leads} leads
+          </div>
+          <div
+            style={{
+              fontSize: 12,
+              fontFamily: "var(--font-mono)",
+              fontWeight: 700,
+              color: "var(--color-jbp-red)",
+              fontVariantNumeric: "tabular-nums",
+              textAlign: "right",
+            }}
+          >
+            {formatCompactMoney(r.revenue)}
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
