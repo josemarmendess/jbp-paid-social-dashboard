@@ -19,7 +19,7 @@ import {
   formatCurrency,
   formatInt,
 } from "@/lib/format";
-import type { DateRangePreset } from "@/lib/types";
+import type { ComparisonMode, DateRangePreset } from "@/lib/types";
 
 interface HistoryClientProps {
   businessUnits: string[];
@@ -29,6 +29,7 @@ interface HistoryClientProps {
     customEnd?: string;
     bu: string[];
     view: ServiceView;
+    comparison: ComparisonMode;
     monthsBack: number;
   };
 }
@@ -47,14 +48,24 @@ export function HistoryClient({
   );
   const [bu, setBu] = useState<string[]>(initialState.bu);
   const [view, setView] = useState<ServiceView>(initialState.view);
+  const [comparison, setComparison] = useState<ComparisonMode>(
+    initialState.comparison,
+  );
   const monthsBack = initialState.monthsBack;
 
   useEffect(() => {
     const sp = new URLSearchParams();
-    appendCommonFilters(sp, { preset, customStart, customEnd, bu, view });
+    appendCommonFilters(sp, {
+      preset,
+      customStart,
+      customEnd,
+      bu,
+      view,
+      comparison,
+    });
     if (monthsBack !== 12) sp.set("months", String(monthsBack));
     replaceQuery(sp.toString());
-  }, [preset, customStart, customEnd, bu, view, monthsBack]);
+  }, [preset, customStart, customEnd, bu, view, comparison, monthsBack]);
 
   const slices = useMemo(() => getServiceSlices(bu, view), [bu, view]);
 
@@ -106,6 +117,8 @@ export function HistoryClient({
         onBuChange={setBu}
         view={view}
         onViewChange={setView}
+        comparison={comparison}
+        onComparisonChange={setComparison}
         caption={`Last ${monthsBack} months · ?months=24 to widen`}
       />
       <div
@@ -373,11 +386,13 @@ function HistoryBars({
   maxSpend: number;
   maxRev: number;
 }) {
-  // SVG-based MoM chart so width/height are deterministic regardless of
-  // flex hierarchy. Three things per month, per the redesign brief:
+  // Interactive SVG MoM chart. Three things per month, per the brief:
   //   1) Spend bar (red)
   //   2) Revenue bar (navy)
   //   3) Spend / Revenue ratio line (ink, secondary right axis)
+  // Hover anywhere over a month band shows a tooltip with all three.
+  // Soft vertical bands separate months for legibility.
+  const [hover, setHover] = useState<number | null>(null);
   if (rows.length === 0) return null;
   const w = 880;
   const h = 240;
@@ -404,19 +419,40 @@ function HistoryBars({
       if (r == null) return null;
       const x = padL + i * stepX + stepX / 2;
       const y = padT + innerH - (r / maxRatio) * innerH;
-      return { x, y };
+      return { x, y, i };
     })
-    .filter((p): p is { x: number; y: number } => p !== null);
+    .filter(
+      (p): p is { x: number; y: number; i: number } => p !== null,
+    );
   const linePath = linePts
     .map((p, i) => (i === 0 ? "M" : "L") + p.x.toFixed(1) + "," + p.y.toFixed(1))
     .join(" ");
 
   return (
-    <svg
-      width="100%"
-      viewBox={`0 0 ${w} ${h}`}
-      style={{ display: "block", overflow: "visible" }}
-    >
+    <div style={{ position: "relative" }}>
+      <svg
+        width="100%"
+        viewBox={`0 0 ${w} ${h}`}
+        style={{ display: "block", overflow: "visible" }}
+        onMouseLeave={() => setHover(null)}
+      >
+      {/* Alternating month bands so each pair of bars reads as one
+          month group rather than blurring into the neighbours. */}
+      {rows.map((_, i) => {
+        if (i % 2 === 0) return null;
+        const x = padL + i * stepX;
+        return (
+          <rect
+            key={`band-${i}`}
+            x={x}
+            y={padT}
+            width={stepX}
+            height={innerH}
+            fill="var(--color-jbp-paper)"
+            fillOpacity="0.6"
+          />
+        );
+      })}
       {/* Left ($) axis grid */}
       {barTicks.map((t, i) => {
         const y = padT + innerH - (t / maxBar) * innerH;
@@ -516,12 +552,68 @@ function HistoryBars({
           key={`p-${i}`}
           cx={p.x}
           cy={p.y}
-          r="2.5"
+          r={hover === p.i ? 4 : 2.5}
           fill="var(--color-jbp-ink-soft)"
           stroke="#fff"
           strokeWidth="1.5"
         />
       ))}
-    </svg>
+      {/* Hover hit-tests — full-height rects, one per month band */}
+      {rows.map((_, i) => {
+        const x = padL + i * stepX;
+        return (
+          <rect
+            key={`hit-${i}`}
+            x={x}
+            y={padT}
+            width={stepX}
+            height={innerH}
+            fill="transparent"
+            onMouseEnter={() => setHover(i)}
+          />
+        );
+      })}
+      {/* Hover crosshair */}
+      {hover != null ? (
+        <line
+          x1={padL + hover * stepX + stepX / 2}
+          y1={padT}
+          x2={padL + hover * stepX + stepX / 2}
+          y2={padT + innerH}
+          stroke="var(--color-jbp-text)"
+          strokeOpacity="0.25"
+          strokeDasharray="3 3"
+        />
+      ) : null}
+      </svg>
+      {hover != null ? (
+        <div
+          style={{
+            position: "absolute",
+            top: 12,
+            left: `calc(${((padL + hover * stepX + stepX / 2) / w) * 100}% + 10px)`,
+            background: "var(--color-jbp-ink)",
+            color: "var(--color-jbp-cream)",
+            padding: "8px 12px",
+            fontSize: 11,
+            fontFamily: "var(--font-mono)",
+            whiteSpace: "nowrap",
+            pointerEvents: "none",
+          }}
+        >
+          <div style={{ fontWeight: 700, marginBottom: 4, letterSpacing: 0.5 }}>
+            {rows[hover].month}
+          </div>
+          <div>Spend &nbsp;&nbsp;&nbsp;{formatCompactMoney(rows[hover].spend)}</div>
+          <div>Revenue &nbsp;{formatCompactMoney(rows[hover].sales)}</div>
+          <div>
+            Spend/Rev{" "}
+            {ratios[hover] != null
+              ? ratios[hover]!.toFixed(1) + "%"
+              : "n/a"}
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }

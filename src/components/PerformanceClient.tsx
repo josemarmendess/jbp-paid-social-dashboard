@@ -21,7 +21,7 @@ import {
   formatInt,
 } from "@/lib/format";
 import { rollingDaysList } from "@/lib/periods";
-import type { DateRangePreset, MetaAdCreativeRow } from "@/lib/types";
+import type { ComparisonMode, DateRangePreset, MetaAdCreativeRow } from "@/lib/types";
 
 interface PerformanceClientProps {
   businessUnits: string[];
@@ -30,6 +30,7 @@ interface PerformanceClientProps {
     customStart?: string;
     customEnd?: string;
     bu: string[];
+    comparison: ComparisonMode;
   };
 }
 
@@ -46,16 +47,25 @@ export function PerformanceClient({
     initialState.customEnd,
   );
   const [bu, setBu] = useState<string[]>(initialState.bu);
+  const [comparison, setComparison] = useState<ComparisonMode>(
+    initialState.comparison,
+  );
 
   useEffect(() => {
     const sp = new URLSearchParams();
-    appendCommonFilters(sp, { preset, customStart, customEnd, bu });
+    appendCommonFilters(sp, {
+      preset,
+      customStart,
+      customEnd,
+      bu,
+      comparison,
+    });
     replaceQuery(sp.toString());
-  }, [preset, customStart, customEnd, bu]);
+  }, [preset, customStart, customEnd, bu, comparison]);
 
   const period = useMemo(
-    () => getPeriod(preset, customStart, customEnd),
-    [preset, customStart, customEnd],
+    () => getPeriod(preset, customStart, customEnd, comparison),
+    [preset, customStart, customEnd, comparison],
   );
   const sevenDayDates = useMemo(() => rollingDaysList(7), []);
 
@@ -173,6 +183,8 @@ export function PerformanceClient({
         bu={bu}
         onBuChange={setBu}
         showViewToggle={false}
+        comparison={comparison}
+        onComparisonChange={setComparison}
       />
       <div
         style={{

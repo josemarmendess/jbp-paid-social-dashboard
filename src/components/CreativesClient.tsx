@@ -16,7 +16,7 @@ import { appendCommonFilters, replaceQuery } from "@/lib/clientUrlState";
 import { getPeriod } from "@/lib/dateRange";
 import { formatInt } from "@/lib/format";
 import { rollingDaysList } from "@/lib/periods";
-import type { DateRangePreset, MetaAdCreativeRow } from "@/lib/types";
+import type { ComparisonMode, DateRangePreset, MetaAdCreativeRow } from "@/lib/types";
 
 const WIN_CTR = 0.015;
 const WIN_CPL_QUANTILE = 0.5; // top half of CPL = "low CPL"
@@ -30,6 +30,7 @@ interface CreativesClientProps {
     customEnd?: string;
     bu: string[];
     view: ServiceView;
+    comparison: ComparisonMode;
   };
 }
 
@@ -47,16 +48,26 @@ export function CreativesClient({
   );
   const [bu, setBu] = useState<string[]>(initialState.bu);
   const [view, setView] = useState<ServiceView>(initialState.view);
+  const [comparison, setComparison] = useState<ComparisonMode>(
+    initialState.comparison,
+  );
 
   useEffect(() => {
     const sp = new URLSearchParams();
-    appendCommonFilters(sp, { preset, customStart, customEnd, bu, view });
+    appendCommonFilters(sp, {
+      preset,
+      customStart,
+      customEnd,
+      bu,
+      view,
+      comparison,
+    });
     replaceQuery(sp.toString());
-  }, [preset, customStart, customEnd, bu, view]);
+  }, [preset, customStart, customEnd, bu, view, comparison]);
 
   const period = useMemo(
-    () => getPeriod(preset, customStart, customEnd),
-    [preset, customStart, customEnd],
+    () => getPeriod(preset, customStart, customEnd, comparison),
+    [preset, customStart, customEnd, comparison],
   );
   const slices = useMemo(() => getServiceSlices(bu, view), [bu, view]);
   const sevenDayDates = useMemo(() => rollingDaysList(7), []);
@@ -133,6 +144,8 @@ export function CreativesClient({
         onBuChange={setBu}
         view={view}
         onViewChange={setView}
+        comparison={comparison}
+        onComparisonChange={setComparison}
         caption={
           Object.keys(creativeByAd).length === 0
             ? "Thumbnails will appear once meta_ad_creatives is in the API"

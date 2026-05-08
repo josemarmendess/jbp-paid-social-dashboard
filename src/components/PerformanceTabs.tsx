@@ -8,6 +8,7 @@ import {
 import { EntityDetailPanel } from "@/components/EntityDetailPanel";
 import { CreativeModal } from "@/components/CreativeModal";
 import { CreativeThumb } from "@/components/CreativeThumb";
+import { ServiceTag, StatusPill } from "@/components/design";
 import { Sparkline } from "@/components/Sparkline";
 import {
   formatCurrency,
@@ -226,10 +227,25 @@ function adColumns(
       value: (r) => (r.businessUnit ?? "").toLowerCase(),
       render: (r) =>
         r.businessUnit ? (
-          <Badge>{r.businessUnit}</Badge>
+          <ServiceTag label={r.businessUnit} />
         ) : (
           <span className="text-[color:var(--color-text-tertiary)]">—</span>
         ),
+    },
+    {
+      key: "status",
+      label: "Status",
+      align: "left",
+      value: (r) =>
+        (creativeByAd[r.adName]?.status ?? "").toLowerCase(),
+      render: (r) => {
+        const s = creativeByAd[r.adName]?.status;
+        return s ? (
+          <StatusPill status={s} />
+        ) : (
+          <span className="text-[color:var(--color-text-tertiary)]">—</span>
+        );
+      },
     },
     {
       key: "audience",
@@ -421,7 +437,7 @@ const BU_COLUMNS: ColumnDef<AggregatedBusinessUnit>[] = [
     label: "Service",
     align: "left",
     value: (r) => r.businessUnit.toLowerCase(),
-    render: (r) => <Badge>{r.businessUnit}</Badge>,
+    render: (r) => <ServiceTag label={r.businessUnit} />,
   },
   {
     key: "spend",
@@ -529,7 +545,7 @@ function AdPanelBody({
           <Badge tone={ad.audience === "Retargeting" ? "blue" : "neutral"}>
             {ad.audience}
           </Badge>
-          {ad.businessUnit ? <Badge>{ad.businessUnit}</Badge> : null}
+          {ad.businessUnit ? <ServiceTag label={ad.businessUnit} /> : null}
         </div>
         <button
           type="button"

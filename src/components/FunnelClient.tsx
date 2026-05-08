@@ -22,7 +22,7 @@ import { appendCommonFilters, replaceQuery } from "@/lib/clientUrlState";
 import { getPeriod } from "@/lib/dateRange";
 import { formatCompactInt, pctChange } from "@/lib/format";
 import { rollingDaysList } from "@/lib/periods";
-import type { DateRangePreset } from "@/lib/types";
+import type { ComparisonMode, DateRangePreset } from "@/lib/types";
 
 interface FunnelClientProps {
   businessUnits: string[];
@@ -32,6 +32,7 @@ interface FunnelClientProps {
     customEnd?: string;
     bu: string[];
     view: ServiceView;
+    comparison: ComparisonMode;
   };
 }
 
@@ -49,16 +50,26 @@ export function FunnelClient({
   );
   const [bu, setBu] = useState<string[]>(initialState.bu);
   const [view, setView] = useState<ServiceView>(initialState.view);
+  const [comparison, setComparison] = useState<ComparisonMode>(
+    initialState.comparison,
+  );
 
   useEffect(() => {
     const sp = new URLSearchParams();
-    appendCommonFilters(sp, { preset, customStart, customEnd, bu, view });
+    appendCommonFilters(sp, {
+      preset,
+      customStart,
+      customEnd,
+      bu,
+      view,
+      comparison,
+    });
     replaceQuery(sp.toString());
-  }, [preset, customStart, customEnd, bu, view]);
+  }, [preset, customStart, customEnd, bu, view, comparison]);
 
   const period = useMemo(
-    () => getPeriod(preset, customStart, customEnd),
-    [preset, customStart, customEnd],
+    () => getPeriod(preset, customStart, customEnd, comparison),
+    [preset, customStart, customEnd, comparison],
   );
   const slices = useMemo(() => getServiceSlices(bu, view), [bu, view]);
   const trendDates30 = useMemo(() => rollingDaysList(30), []);
@@ -137,6 +148,8 @@ export function FunnelClient({
         onBuChange={setBu}
         view={view}
         onViewChange={setView}
+        comparison={comparison}
+        onComparisonChange={setComparison}
       />
       <div
         style={{
@@ -232,10 +245,9 @@ function FunnelSlice({
     booked: funnel.bookedJobs,
     sold: funnel.soldJobs,
   };
-  // Sizing the trapezoid by impressions made every other bar tiny and
-  // illegible. Use clicks as the visual max (so impressions becomes a
-  // full-width header) and floor every bar at 35% so labels + values fit.
-  const visualMax = funnel.linkClicks || 1;
+  // Trapezoid is decorative — fixed sequence per stage. The conversion-
+  // rate annotations between stages carry the actual data signal.
+  const FIXED_WIDTHS = [100, 78, 60, 44, 30];
 
   const d = (curr: number, prev: number) => pctChange(curr, prev) * 100;
 
@@ -276,16 +288,7 @@ function FunnelSlice({
             }}
           >
             {stages.map((s, idx) => {
-              // Stage 0 (Impressions) renders as a full-width header bar so
-              // its raw count doesn't dwarf the rest. Stages 1+ scale against
-              // link clicks with a 35% floor for legibility.
-              const widthPct =
-                idx === 0
-                  ? 100
-                  : Math.max(
-                      Math.pow(s.value / visualMax, 0.55) * 100,
-                      35,
-                    );
+              const widthPct = FIXED_WIDTHS[idx] ?? 22;
               const dropRate =
                 s.prev && valueByKey[s.prev] > 0
                   ? (s.value / valueByKey[s.prev]) * 100

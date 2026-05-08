@@ -212,12 +212,69 @@ export function CreativeGallery({
                     alt={ad.adName}
                     size={320}
                   />
+                  {/* Meta status (top-left) — driven by meta_ad_creatives.status */}
+                  {creative?.status ? (
+                    <span
+                      className="absolute left-2 top-2 inline-flex items-center gap-1 bg-white/95 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide backdrop-blur-sm"
+                      style={{
+                        color: /active|live/i.test(creative.status)
+                          ? "var(--color-jbp-good)"
+                          : /paus/i.test(creative.status)
+                            ? "var(--color-jbp-warn)"
+                            : "var(--color-jbp-text-2)",
+                        fontFamily: "var(--font-mono)",
+                        letterSpacing: 0.5,
+                      }}
+                    >
+                      <span
+                        className="h-1.5 w-1.5 rounded-full"
+                        style={{
+                          background: /active|live/i.test(creative.status)
+                            ? "var(--color-jbp-good)"
+                            : /paus/i.test(creative.status)
+                              ? "var(--color-jbp-warn)"
+                              : "var(--color-jbp-text-2)",
+                        }}
+                      />
+                      {creative.status}
+                    </span>
+                  ) : null}
+                  {/* Audience + BU (top-right) */}
                   <span
                     className="absolute right-2 top-2 inline-flex items-center rounded-md bg-[color:var(--color-text-primary)]/85 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white backdrop-blur-sm"
                   >
                     {ad.audience}
                     {ad.businessUnit ? ` · ${ad.businessUnit}` : ""}
                   </span>
+                  {/* External link to the ad on Meta — only when permalink_url
+                      is populated by Apps Script. Stops propagation so card click
+                      still opens the local modal. */}
+                  {creative?.permalink_url ? (
+                    <a
+                      href={creative.permalink_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      title="Open on Meta"
+                      className="absolute bottom-2 right-2 inline-flex h-7 w-7 items-center justify-center bg-white/95 text-[color:var(--color-jbp-text)] backdrop-blur-sm transition-colors hover:bg-white"
+                      aria-label="Open on Meta"
+                    >
+                      <svg
+                        width="13"
+                        height="13"
+                        viewBox="0 0 13 13"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.6"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="M5 8L11 2" />
+                        <path d="M7 2H11V6" />
+                        <path d="M11 7.5V10.5C11 11 10.5 11.5 10 11.5H2.5C2 11.5 1.5 11 1.5 10.5V3C1.5 2.5 2 2 2.5 2H5.5" />
+                      </svg>
+                    </a>
+                  ) : null}
                 </div>
                 {/* Bottom: copy + stats */}
                 <div className="flex flex-1 flex-col gap-3 p-4">

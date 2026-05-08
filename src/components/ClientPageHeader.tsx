@@ -1,11 +1,12 @@
 "use client";
 
 import { BusinessUnitFilter } from "@/components/BusinessUnitFilter";
+import { ComparisonPicker } from "@/components/ComparisonPicker";
 import { PeriodPicker } from "@/components/PeriodPicker";
 import { ServiceViewToggle } from "@/components/ServiceViewToggle";
 import { buListLabel, type ServiceView } from "@/lib/buFilter";
 import { getPeriod } from "@/lib/dateRange";
-import type { DateRangePreset } from "@/lib/types";
+import type { ComparisonMode, DateRangePreset } from "@/lib/types";
 
 interface ClientPageHeaderProps {
   pageTitle: string;
@@ -23,6 +24,9 @@ interface ClientPageHeaderProps {
   view?: ServiceView;
   onViewChange?: (next: ServiceView) => void;
   showViewToggle?: boolean;
+  /** Comparison anchor — drives previous-period dates everywhere. */
+  comparison?: ComparisonMode;
+  onComparisonChange?: (next: ComparisonMode) => void;
   /** Optional override for the secondary line under the title. */
   caption?: string;
 }
@@ -44,10 +48,12 @@ export function ClientPageHeader({
   view,
   onViewChange,
   showViewToggle = true,
+  comparison = "prior_period",
+  onComparisonChange,
   caption,
 }: ClientPageHeaderProps) {
   const filterActive = bu.length > 0;
-  const period = getPeriod(preset, customStart, customEnd);
+  const period = getPeriod(preset, customStart, customEnd, comparison);
   const captionLine =
     caption ??
     `${period.label.toUpperCase()} · ${period.current.startStr} → ${period.current.endStr} · VS PRIOR · ${period.previous.startStr} → ${period.previous.endStr}`;
@@ -130,6 +136,12 @@ export function ClientPageHeader({
           customEnd={preset === "custom" ? customEnd : undefined}
           onChange={onDateChange}
         />
+        {onComparisonChange ? (
+          <ComparisonPicker
+            value={comparison}
+            onChange={onComparisonChange}
+          />
+        ) : null}
         <BusinessUnitFilter
           options={businessUnits}
           value={bu}

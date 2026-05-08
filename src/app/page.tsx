@@ -1,6 +1,6 @@
 import { OverviewClient } from "@/components/OverviewClient";
 import { CANONICAL_SERVICES } from "@/lib/serviceTaxonomy";
-import { parsePreset } from "@/lib/dateRange";
+import { parseComparison, parsePreset } from "@/lib/dateRange";
 import { parseBuList, parseView } from "@/lib/buFilter";
 import { parseGoalTargets } from "@/lib/goals";
 import {
@@ -21,6 +21,7 @@ interface PageProps {
     cplTarget?: string;
     roasTarget?: string;
     cancelTarget?: string;
+    cmp?: string;
   }>;
 }
 
@@ -40,6 +41,7 @@ export default async function Page({ searchParams }: PageProps) {
     customEnd: sp.end,
     bu: parseBuList(sp.bu, businessUnits),
     view: parseView(sp.view),
+    comparison: parseComparison(sp.cmp),
     pivotRowKeys: parsePivotRowKeys(sp.pivotRows),
     pivotColKeys: parsePivotColKeys(
       sp.pivotCols,

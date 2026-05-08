@@ -459,6 +459,59 @@ export function CumulativeSpendRatioChart({
   );
 }
 
+/* ─────────────────── Window-length toggle (8/16/26/52w) ─────────────────── */
+
+export function WeeksToggle({
+  value,
+  onChange,
+}: {
+  value: 8 | 16 | 26 | 52;
+  onChange: (next: 8 | 16 | 26 | 52) => void;
+}) {
+  const opts: Array<8 | 16 | 26 | 52> = [8, 16, 26, 52];
+  return (
+    <div
+      role="group"
+      aria-label="Window length (weeks)"
+      style={{
+        display: "inline-flex",
+        border: "1px solid var(--color-jbp-hairline)",
+        background: "var(--color-jbp-white)",
+      }}
+    >
+      {opts.map((n, i) => {
+        const active = n === value;
+        return (
+          <button
+            key={n}
+            type="button"
+            onClick={() => onChange(n)}
+            style={{
+              padding: "4px 10px",
+              border: "none",
+              borderLeft:
+                i > 0 ? "1px solid var(--color-jbp-hairline)" : "none",
+              background: active
+                ? "var(--color-jbp-ink)"
+                : "transparent",
+              color: active
+                ? "var(--color-jbp-cream)"
+                : "var(--color-jbp-text-2)",
+              fontFamily: "var(--font-mono)",
+              fontSize: 10,
+              fontWeight: active ? 700 : 600,
+              letterSpacing: 0.6,
+              cursor: "pointer",
+            }}
+          >
+            {n}W
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 /* ─────────────────── Cancellation / Show rate dual line ─────────────────── */
 
 export interface DualLinePoint {
@@ -746,21 +799,17 @@ export function HorizontalFunnel({
   stages: FunnelStage[];
   values: Record<string, number>;
 }) {
-  // Sizing: Impressions is shown as a "header" stage at full width — its
-  // raw count would dwarf every other bar otherwise. Stages 2-5 are sized
-  // relative to LINK CLICKS (the second stage), with a 12% floor so the
-  // smallest bar still has room for its number/label.
-  const sizingMax = stages[1] ? values[stages[1].key] : 0;
+  // Trapezoid sizing is decorative — fixed sequence per stage rank, not
+  // proportional to raw counts. The exact proportions across orders of
+  // magnitude (100k impressions → 50 sold) are unreadable at any chart
+  // size; the rate annotations next to each bar carry the conversion data.
+  const FIXED_WIDTHS = [100, 80, 62, 46, 32, 22];
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
       {stages.map((s, idx) => {
         const v = values[s.key] ?? 0;
         const isHeader = idx === 0;
-        const widthPct = isHeader
-          ? 100
-          : sizingMax > 0
-            ? Math.max((v / sizingMax) * 100, 12)
-            : 12;
+        const widthPct = FIXED_WIDTHS[idx] ?? 22;
         const rate =
           s.rateOf && values[s.rateOf]
             ? (v / values[s.rateOf]) * 100

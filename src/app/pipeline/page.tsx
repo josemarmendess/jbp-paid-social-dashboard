@@ -1,6 +1,6 @@
 import { PipelineClient } from "@/components/PipelineClient";
 import { CANONICAL_SERVICES } from "@/lib/serviceTaxonomy";
-import { parsePreset } from "@/lib/dateRange";
+import { parseComparison, parsePreset } from "@/lib/dateRange";
 import { parseBuList, parseView } from "@/lib/buFilter";
 
 interface PageProps {
@@ -9,6 +9,7 @@ interface PageProps {
     start?: string;
     end?: string;
     bu?: string;
+    cmp?: string;
     view?: string;
   }>;
 }
@@ -25,6 +26,7 @@ export default async function PipelinePage({ searchParams }: PageProps) {
         customEnd: sp.end,
         bu: parseBuList(sp.bu, businessUnits),
         view: parseView(sp.view),
+        comparison: parseComparison(sp.cmp),
       }}
     />
   );

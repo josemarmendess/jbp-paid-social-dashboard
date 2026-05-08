@@ -1,6 +1,7 @@
 import {
   startOfMonth,
   subMonths,
+  subYears,
   endOfMonth,
   setDate,
   subDays,
@@ -8,7 +9,11 @@ import {
   parseISO,
   format,
 } from "date-fns";
-import type { DateRangePreset, PeriodPair } from "./types";
+import type {
+  ComparisonMode,
+  DateRangePreset,
+  PeriodPair,
+} from "./types";
 
 const BUSINESS_TZ = "America/Chicago";
 const ISO_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -100,7 +105,82 @@ export function chicagoTodayStr(): string {
  * If they're missing or malformed we fall back to "today" so the page never
  * crashes on a bad URL.
  */
+export function parseComparison(raw: string | undefined): ComparisonMode {
+  if (raw === "prior_month" || raw === "prior_year") return raw;
+  return "prior_period";
+}
+
+const COMPARISON_LABELS: Record<ComparisonMode, string> = {
+  prior_period: "Prior period",
+  prior_month: "Prior month",
+  prior_year: "Prior year",
+};
+
+export const COMPARISON_OPTIONS: ReadonlyArray<{
+  value: ComparisonMode;
+  label: string;
+}> = [
+  { value: "prior_period", label: COMPARISON_LABELS.prior_period },
+  { value: "prior_month", label: COMPARISON_LABELS.prior_month },
+  { value: "prior_year", label: COMPARISON_LABELS.prior_year },
+];
+
+/**
+ * Apply a ComparisonMode to a (current) range — returns the previous range
+ * for delta computations. "prior_period" is the default getPeriod behavior;
+ * "prior_month" and "prior_year" shift the same start/end dates by 1 month
+ * or 1 year.
+ */
+function applyComparison(
+  current: { startStr: string; endStr: string },
+  mode: ComparisonMode,
+): { startStr: string; endStr: string } {
+  if (mode === "prior_period") {
+    const startD = parseISO(current.startStr);
+    const endD = parseISO(current.endStr);
+    const days = differenceInCalendarDays(endD, startD) + 1;
+    const prevEnd = subDays(startD, 1);
+    const prevStart = subDays(prevEnd, days - 1);
+    return { startStr: ymd(prevStart), endStr: ymd(prevEnd) };
+  }
+  if (mode === "prior_month") {
+    const startD = parseISO(current.startStr);
+    const endD = parseISO(current.endStr);
+    return {
+      startStr: ymd(subMonths(startD, 1)),
+      endStr: ymd(subMonths(endD, 1)),
+    };
+  }
+  // prior_year
+  const startD = parseISO(current.startStr);
+  const endD = parseISO(current.endStr);
+  return {
+    startStr: ymd(subYears(startD, 1)),
+    endStr: ymd(subYears(endD, 1)),
+  };
+}
+
 export function getPeriod(
+  preset: DateRangePreset,
+  customStart?: string,
+  customEnd?: string,
+  comparison: ComparisonMode = "prior_period",
+): PeriodPair {
+  const base = getPeriodBase(preset, customStart, customEnd);
+  if (comparison === "prior_period") return base;
+  // Override the previous range to follow the requested comparison mode.
+  const previous = applyComparison(base.current, comparison);
+  return {
+    ...base,
+    previous,
+    previousLabel:
+      comparison === "prior_month"
+        ? "vs. same days last month"
+        : "vs. same days last year",
+  };
+}
+
+function getPeriodBase(
   preset: DateRangePreset,
   customStart?: string,
   customEnd?: string,

@@ -1,5 +1,5 @@
 import { serializeBuList, type ServiceView } from "./buFilter";
-import type { DateRangePreset } from "./types";
+import type { ComparisonMode, DateRangePreset } from "./types";
 
 /**
  * Serializes the common filter set to a URLSearchParams instance. Pages
@@ -13,6 +13,7 @@ export function appendCommonFilters(
     customEnd?: string;
     bu: string[];
     view?: ServiceView;
+    comparison?: ComparisonMode;
   },
 ): void {
   if (state.preset !== "this_month") sp.set("range", state.preset);
@@ -22,6 +23,9 @@ export function appendCommonFilters(
   }
   if (state.bu.length > 0) sp.set("bu", serializeBuList(state.bu));
   if (state.view && state.view !== "combined") sp.set("view", state.view);
+  if (state.comparison && state.comparison !== "prior_period") {
+    sp.set("cmp", state.comparison);
+  }
 }
 
 /**

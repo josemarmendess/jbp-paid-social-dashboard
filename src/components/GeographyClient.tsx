@@ -16,7 +16,7 @@ import { getServiceSlices, type ServiceView } from "@/lib/buFilter";
 import { appendCommonFilters, replaceQuery } from "@/lib/clientUrlState";
 import { getPeriod } from "@/lib/dateRange";
 import { formatCompactMoney, formatInt } from "@/lib/format";
-import type { DateRangePreset } from "@/lib/types";
+import type { ComparisonMode, DateRangePreset } from "@/lib/types";
 
 interface GeographyClientProps {
   businessUnits: string[];
@@ -26,6 +26,7 @@ interface GeographyClientProps {
     customEnd?: string;
     bu: string[];
     view: ServiceView;
+    comparison: ComparisonMode;
   };
 }
 
@@ -43,16 +44,26 @@ export function GeographyClient({
   );
   const [bu, setBu] = useState<string[]>(initialState.bu);
   const [view, setView] = useState<ServiceView>(initialState.view);
+  const [comparison, setComparison] = useState<ComparisonMode>(
+    initialState.comparison,
+  );
 
   useEffect(() => {
     const sp = new URLSearchParams();
-    appendCommonFilters(sp, { preset, customStart, customEnd, bu, view });
+    appendCommonFilters(sp, {
+      preset,
+      customStart,
+      customEnd,
+      bu,
+      view,
+      comparison,
+    });
     replaceQuery(sp.toString());
-  }, [preset, customStart, customEnd, bu, view]);
+  }, [preset, customStart, customEnd, bu, view, comparison]);
 
   const period = useMemo(
-    () => getPeriod(preset, customStart, customEnd),
-    [preset, customStart, customEnd],
+    () => getPeriod(preset, customStart, customEnd, comparison),
+    [preset, customStart, customEnd, comparison],
   );
   const slices = useMemo(() => getServiceSlices(bu, view), [bu, view]);
 
@@ -104,6 +115,8 @@ export function GeographyClient({
         onBuChange={setBu}
         view={view}
         onViewChange={setView}
+        comparison={comparison}
+        onComparisonChange={setComparison}
       />
       <div
         style={{
@@ -266,56 +279,101 @@ function GeographySlice({
                 </tr>
               </thead>
               <tbody>
-                {rows.slice(0, 50).map((z) => (
-                  <tr
-                    key={z.zip}
-                    style={{
-                      borderBottom:
-                        "1px solid var(--color-jbp-hairline-soft)",
-                    }}
-                  >
-                    <td
+                {rows.slice(0, 50).map((z, i) => {
+                  // Lead share visualisation: small bar inside the leads
+                  // cell, scaled to the top zip's count. Adds depth to a
+                  // table that was otherwise just numbers.
+                  const topLeads = rows[0]?.leads ?? 1;
+                  const sharePct = topLeads > 0 ? (z.leads / topLeads) * 100 : 0;
+                  return (
+                    <tr
+                      key={z.zip}
                       style={{
-                        padding: "10px 12px",
-                        fontFamily: "var(--font-mono)",
-                        fontWeight: 700,
+                        borderBottom:
+                          "1px solid var(--color-jbp-hairline-soft)",
+                        background:
+                          i === 0
+                            ? "var(--color-jbp-paper)"
+                            : "transparent",
                       }}
                     >
-                      {z.zip}
-                    </td>
-                    <td
-                      style={{
-                        padding: "10px 12px",
-                        textAlign: "right",
-                        fontFamily: "var(--font-mono)",
-                        fontVariantNumeric: "tabular-nums",
-                        fontWeight: 700,
-                      }}
-                    >
-                      {z.leads}
-                    </td>
-                    <td
-                      style={{
-                        padding: "10px 12px",
-                        textAlign: "right",
-                        fontFamily: "var(--font-mono)",
-                        fontVariantNumeric: "tabular-nums",
-                      }}
-                    >
-                      {z.bookedJobs}
-                    </td>
-                    <td
-                      style={{
-                        padding: "10px 12px",
-                        textAlign: "right",
-                        fontFamily: "var(--font-mono)",
-                        fontVariantNumeric: "tabular-nums",
-                      }}
-                    >
-                      {formatCompactMoney(z.sales)}
-                    </td>
-                  </tr>
-                ))}
+                      <td
+                        style={{
+                          padding: "10px 12px",
+                          fontFamily: "var(--font-mono)",
+                          fontWeight: 700,
+                          color:
+                            i === 0
+                              ? "var(--color-jbp-red)"
+                              : "var(--color-jbp-text)",
+                        }}
+                      >
+                        {z.zip}
+                      </td>
+                      <td
+                        style={{
+                          padding: "10px 12px",
+                          fontFamily: "var(--font-mono)",
+                          fontVariantNumeric: "tabular-nums",
+                          fontWeight: 700,
+                          minWidth: 120,
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 6,
+                            justifyContent: "flex-end",
+                          }}
+                        >
+                          <div
+                            style={{
+                              flex: 1,
+                              height: 4,
+                              background: "var(--color-jbp-hairline)",
+                              position: "relative",
+                              maxWidth: 64,
+                            }}
+                          >
+                            <div
+                              style={{
+                                position: "absolute",
+                                inset: "0 auto 0 0",
+                                width: sharePct + "%",
+                                background: "var(--color-jbp-red)",
+                              }}
+                            />
+                          </div>
+                          <span style={{ minWidth: 24, textAlign: "right" }}>
+                            {z.leads}
+                          </span>
+                        </div>
+                      </td>
+                      <td
+                        style={{
+                          padding: "10px 12px",
+                          textAlign: "right",
+                          fontFamily: "var(--font-mono)",
+                          fontVariantNumeric: "tabular-nums",
+                        }}
+                      >
+                        {z.bookedJobs}
+                      </td>
+                      <td
+                        style={{
+                          padding: "10px 12px",
+                          textAlign: "right",
+                          fontFamily: "var(--font-mono)",
+                          fontVariantNumeric: "tabular-nums",
+                          fontWeight: 700,
+                        }}
+                      >
+                        {formatCompactMoney(z.sales)}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

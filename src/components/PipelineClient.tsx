@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   DualLineChart,
+  WeeksToggle,
   type DualLinePoint,
 } from "@/components/charts";
 import { ClientPageHeader } from "@/components/ClientPageHeader";
@@ -31,7 +32,7 @@ import {
   formatInt,
 } from "@/lib/format";
 import { getLastMonthRange } from "@/lib/periods";
-import type { DateRange, DateRangePreset, ServiceTitanRow } from "@/lib/types";
+import type { ComparisonMode, DateRange, DateRangePreset, ServiceTitanRow } from "@/lib/types";
 
 const STALE_DAYS = 14;
 
@@ -56,6 +57,7 @@ interface PipelineClientProps {
     customEnd?: string;
     bu: string[];
     view: ServiceView;
+    comparison: ComparisonMode;
   };
 }
 
@@ -73,16 +75,27 @@ export function PipelineClient({
   );
   const [bu, setBu] = useState<string[]>(initialState.bu);
   const [view, setView] = useState<ServiceView>(initialState.view);
+  const [comparison, setComparison] = useState<ComparisonMode>(
+    initialState.comparison,
+  );
+  const [trendWeeks, setTrendWeeks] = useState<8 | 16 | 26 | 52>(8);
 
   useEffect(() => {
     const sp = new URLSearchParams();
-    appendCommonFilters(sp, { preset, customStart, customEnd, bu, view });
+    appendCommonFilters(sp, {
+      preset,
+      customStart,
+      customEnd,
+      bu,
+      view,
+      comparison,
+    });
     replaceQuery(sp.toString());
-  }, [preset, customStart, customEnd, bu, view]);
+  }, [preset, customStart, customEnd, bu, view, comparison]);
 
   const period = useMemo(
-    () => getPeriod(preset, customStart, customEnd),
-    [preset, customStart, customEnd],
+    () => getPeriod(preset, customStart, customEnd, comparison),
+    [preset, customStart, customEnd, comparison],
   );
   const lastMonth = useMemo(() => getLastMonthRange(), []);
   const slices = useMemo(() => getServiceSlices(bu, view), [bu, view]);
@@ -131,23 +144,26 @@ export function PipelineClient({
         data.servicetitan_social_leads,
         slice.bu,
         "week",
-        8,
+        trendWeeks,
       );
       const showWeekly = showRateSeries(
         data.servicetitan_social_leads,
         slice.bu,
         "week",
-        8,
+        trendWeeks,
       );
+      const lookback = Math.floor(trendWeeks / 2);
       const cancelDual: DualLinePoint[] = cancelWeekly.map((p, i, arr) => ({
         bucket: p.bucket.replace(/^\d{4}-/, ""),
         current: p.rate,
-        previous: i >= 4 ? arr[i - 4]?.rate ?? null : null,
+        previous:
+          i >= lookback ? (arr[i - lookback]?.rate ?? null) : null,
       }));
       const showDual: DualLinePoint[] = showWeekly.map((p, i, arr) => ({
         bucket: p.bucket.replace(/^\d{4}-/, ""),
         current: p.rate,
-        previous: i >= 4 ? arr[i - 4]?.rate ?? null : null,
+        previous:
+          i >= lookback ? (arr[i - lookback]?.rate ?? null) : null,
       }));
       return {
         slice,
@@ -160,7 +176,7 @@ export function PipelineClient({
         showDual,
       };
     });
-  }, [data, slices]);
+  }, [data, slices, period, lastMonth, trendWeeks]);
 
   if (!data) {
     return (
@@ -197,6 +213,8 @@ export function PipelineClient({
         onBuChange={setBu}
         view={view}
         onViewChange={setView}
+        comparison={comparison}
+        onComparisonChange={setComparison}
       />
       <div
         style={{
@@ -230,6 +248,8 @@ export function PipelineClient({
             }
             cancelDual={s.cancelDual}
             showDual={s.showDual}
+            trendWeeks={trendWeeks}
+            onTrendWeeksChange={setTrendWeeks}
           />
         ))}
 
@@ -298,6 +318,8 @@ function PipelineSlice({
   atRiskCount,
   cancelDual,
   showDual,
+  trendWeeks,
+  onTrendWeeksChange,
 }: {
   sliceLabel: string | null;
   stages: Record<string, StageStat>;
@@ -308,6 +330,8 @@ function PipelineSlice({
   atRiskCount: number;
   cancelDual: DualLinePoint[];
   showDual: DualLinePoint[];
+  trendWeeks: 8 | 16 | 26 | 52;
+  onTrendWeeksChange: (next: 8 | 16 | 26 | 52) => void;
 }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -444,7 +468,13 @@ function PipelineSlice({
         <Card>
           <CardHeader
             eyebrow="Cancellation rate"
-            title="Weekly · 8w trail"
+            title={`Weekly · ${trendWeeks}w trail`}
+            right={
+              <WeeksToggle
+                value={trendWeeks}
+                onChange={onTrendWeeksChange}
+              />
+            }
           />
           <div style={{ padding: "16px 20px 8px" }}>
             <DualLineChart data={cancelDual} />
@@ -453,7 +483,7 @@ function PipelineSlice({
         <Card>
           <CardHeader
             eyebrow="Show rate"
-            title="Weekly · 8w trail"
+            title={`Weekly · ${trendWeeks}w trail`}
             sub="completed / booked · higher is better"
           />
           <div style={{ padding: "16px 20px 8px" }}>

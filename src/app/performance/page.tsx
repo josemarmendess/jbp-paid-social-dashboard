@@ -1,6 +1,6 @@
 import { PerformanceClient } from "@/components/PerformanceClient";
 import { CANONICAL_SERVICES } from "@/lib/serviceTaxonomy";
-import { parsePreset } from "@/lib/dateRange";
+import { parseComparison, parsePreset } from "@/lib/dateRange";
 import { parseBuList } from "@/lib/buFilter";
 
 interface PageProps {
@@ -9,6 +9,7 @@ interface PageProps {
     start?: string;
     end?: string;
     bu?: string;
+    cmp?: string;
   }>;
 }
 
@@ -23,6 +24,7 @@ export default async function PerformancePage({ searchParams }: PageProps) {
         customStart: sp.start,
         customEnd: sp.end,
         bu: parseBuList(sp.bu, businessUnits),
+        comparison: parseComparison(sp.cmp),
       }}
     />
   );

@@ -7,6 +7,7 @@ import {
   DayOfWeekBars,
   HorizontalFunnel,
   RoasMeter,
+  WeeksToggle,
   type CumulativePoint,
   type DualLinePoint,
 } from "@/components/charts";
@@ -26,7 +27,6 @@ import {
   computeFunnel,
   computeOverviewKpis,
   dailyKpiSeries,
-  dailySpendVsRevenue,
   detectAnomalies,
   type Anomaly,
   type OverviewKpiTotals,
@@ -44,7 +44,7 @@ import {
 } from "@/lib/format";
 import type { GoalTargets } from "@/lib/goals";
 import { rollingDaysList } from "@/lib/periods";
-import type { DateRangePreset } from "@/lib/types";
+import type { ComparisonMode, DateRangePreset } from "@/lib/types";
 
 interface OverviewClientProps {
   businessUnits: string[];
@@ -54,6 +54,7 @@ interface OverviewClientProps {
     customEnd?: string;
     bu: string[];
     view: ServiceView;
+    comparison: ComparisonMode;
     pivotRowKeys: string[];
     pivotColKeys: string[];
     targets: GoalTargets;
@@ -74,12 +75,22 @@ export function OverviewClient({
   );
   const [bu, setBu] = useState<string[]>(initialState.bu);
   const [view, setView] = useState<ServiceView>(initialState.view);
+  const [comparison, setComparison] = useState<ComparisonMode>(
+    initialState.comparison,
+  );
   const [cancelWeeks, setCancelWeeks] = useState<8 | 16 | 26 | 52>(8);
   const targets = initialState.targets;
 
   useEffect(() => {
     const sp = new URLSearchParams();
-    appendCommonFilters(sp, { preset, customStart, customEnd, bu, view });
+    appendCommonFilters(sp, {
+      preset,
+      customStart,
+      customEnd,
+      bu,
+      view,
+      comparison,
+    });
     if (targets.cplTarget != null)
       sp.set("cplTarget", String(targets.cplTarget));
     if (targets.roasTarget != null)
@@ -93,14 +104,15 @@ export function OverviewClient({
     customEnd,
     bu,
     view,
+    comparison,
     targets.cplTarget,
     targets.roasTarget,
     targets.cancelTarget,
   ]);
 
   const period = useMemo(
-    () => getPeriod(preset, customStart, customEnd),
-    [preset, customStart, customEnd],
+    () => getPeriod(preset, customStart, customEnd, comparison),
+    [preset, customStart, customEnd, comparison],
   );
   const slices = useMemo(() => getServiceSlices(bu, view), [bu, view]);
   const sparkDates14 = useMemo(() => rollingDaysList(14), []);
@@ -158,45 +170,41 @@ export function OverviewClient({
         sparkDates14,
         slice.bu,
       );
-      const trend30 = dailySpendVsRevenue(
+      // 30-day per-day series — drives BOTH the cumulative ratio chart and
+      // the conversion-rate sparks. Pulls .sales (the canonical "Sales
+      // Revenue" the rest of the dashboard uses) instead of the older
+      // dailySpendVsRevenue helper, which used the .Revenue column and
+      // disagreed with the Spend/Revenue KPI by an order of magnitude.
+      const rate30Rows = dailyKpiSeries(
         data.meta_insights,
         data.servicetitan_social_leads,
         trendDates30,
         slice.bu,
       );
-      // Build the MTD-cumulative spend / revenue ratio for each day. Resets
-      // at the 1st of every month so the line shows the running ratio for
-      // the day's calendar month only.
+      // Build the MTD-cumulative spend / sales ratio for each day. Resets
+      // at the 1st of every calendar month.
       let cumSpend = 0;
-      let cumRev = 0;
+      let cumSales = 0;
       let lastMonth = "";
-      const trendData: CumulativePoint[] = trend30.map((p) => {
+      const trendData: CumulativePoint[] = rate30Rows.map((p) => {
         const month = p.date.slice(0, 7);
         if (month !== lastMonth) {
           cumSpend = 0;
-          cumRev = 0;
+          cumSales = 0;
           lastMonth = month;
         }
         cumSpend += p.spend;
-        cumRev += p.revenue;
+        cumSales += p.sales;
         return {
           date: p.date,
           spend: p.spend,
-          ratioPct: cumRev > 0 ? (cumSpend / cumRev) * 100 : null,
+          ratioPct: cumSales > 0 ? (cumSpend / cumSales) * 100 : null,
         };
       });
       const funnel = computeFunnel(
         data.meta_insights,
         data.servicetitan_social_leads,
         period.current,
-        slice.bu,
-      );
-      // 30-day per-day rate series — used as inline sparks on the
-      // conversion-rate Metric cells so they read as a trend, not a snapshot.
-      const rate30Rows = dailyKpiSeries(
-        data.meta_insights,
-        data.servicetitan_social_leads,
-        trendDates30,
         slice.bu,
       );
       const safeRatio = (n: number, d: number) => (d > 0 ? n / d : 0);
@@ -211,6 +219,15 @@ export function OverviewClient({
         cancelRate: rate30Rows.map((r) =>
           safeRatio(r.cancelledJobs, r.bookedJobs),
         ),
+      };
+      // 30-day series for the volume + cost row ("the full picture").
+      const volumeSparks = {
+        leads: rate30Rows.map((r) => r.leads),
+        cpl: rate30Rows.map((r) => safeRatio(r.spend, r.leads)),
+        booked: rate30Rows.map((r) => r.bookedJobs),
+        cpb: rate30Rows.map((r) => safeRatio(r.spend, r.bookedJobs)),
+        spendOnRev: rate30Rows.map((r) => safeRatio(r.spend, r.sales) * 100),
+        avgSale: rate30Rows.map((r) => safeRatio(r.sales, r.soldJobs)),
       };
       const cancelWeekly = cancellationRateSeries(
         data.servicetitan_social_leads,
@@ -245,6 +262,7 @@ export function OverviewClient({
         funnel,
         cancelDual,
         rateSparks,
+        volumeSparks,
         dowAvg,
       };
     });
@@ -293,6 +311,8 @@ export function OverviewClient({
         onBuChange={setBu}
         view={view}
         onViewChange={setView}
+        comparison={comparison}
+        onComparisonChange={setComparison}
       />
       <div
         style={{
@@ -317,6 +337,7 @@ export function OverviewClient({
             cancelWeeks={cancelWeeks}
             onCancelWeeksChange={setCancelWeeks}
             rateSparks={s.rateSparks}
+            volumeSparks={s.volumeSparks}
             dowAvg={s.dowAvg}
             roasTarget={targets.roasTarget ?? 5}
             isFirst={i === 0}
@@ -341,6 +362,7 @@ function SliceContent({
   cancelWeeks,
   onCancelWeeksChange,
   rateSparks,
+  volumeSparks,
   dowAvg,
   roasTarget,
 }: {
@@ -361,6 +383,14 @@ function SliceContent({
     showRate: number[];
     closeRate: number[];
     cancelRate: number[];
+  };
+  volumeSparks: {
+    leads: number[];
+    cpl: number[];
+    booked: number[];
+    cpb: number[];
+    spendOnRev: number[];
+    avgSale: number[];
   };
   dowAvg: { day: string; value: number }[];
   roasTarget: number;
@@ -444,6 +474,7 @@ function SliceContent({
             label="Leads"
             value={formatInt(current.leads)}
             delta={d(current.leads, previous.leads)}
+            spark={volumeSparks.leads}
           />
           <Metric
             label="Cost / Lead"
@@ -453,12 +484,14 @@ function SliceContent({
                 : "—"
             }
             delta={d(current.costPerLead, previous.costPerLead)}
+            spark={volumeSparks.cpl}
             invertDelta
           />
           <Metric
             label="Booked Jobs"
             value={formatInt(current.bookedJobs)}
             delta={d(current.bookedJobs, previous.bookedJobs)}
+            spark={volumeSparks.booked}
             hero
           />
           <Metric
@@ -469,17 +502,20 @@ function SliceContent({
                 : "—"
             }
             delta={d(current.costPerBookedJob, previous.costPerBookedJob)}
+            spark={volumeSparks.cpb}
             invertDelta
           />
           <Metric
             label="Spend / Revenue"
             value={spendOnRev != null ? `${spendOnRev.toFixed(1)}%` : "—"}
             delta={d(current.spendOnRevenue, previous.spendOnRevenue)}
+            spark={volumeSparks.spendOnRev}
             invertDelta
           />
           <Metric
             label="Avg Sale"
             value={avgSale > 0 ? formatCompactMoney(avgSale) : "—"}
+            spark={volumeSparks.avgSale}
             last
           />
         </div>
@@ -836,59 +872,6 @@ function AlertsStrip({ anomalies }: { anomalies: Anomaly[] }) {
           </div>
         ))}
       </div>
-    </div>
-  );
-}
-
-/* ───────────────────────────── Weeks toggle ───────────────────────────── */
-
-function WeeksToggle({
-  value,
-  onChange,
-}: {
-  value: 8 | 16 | 26 | 52;
-  onChange: (next: 8 | 16 | 26 | 52) => void;
-}) {
-  const opts: Array<8 | 16 | 26 | 52> = [8, 16, 26, 52];
-  return (
-    <div
-      role="group"
-      aria-label="Window length (weeks)"
-      style={{
-        display: "inline-flex",
-        border: "1px solid var(--color-jbp-hairline)",
-        background: "var(--color-jbp-white)",
-      }}
-    >
-      {opts.map((n, i) => {
-        const active = n === value;
-        return (
-          <button
-            key={n}
-            type="button"
-            onClick={() => onChange(n)}
-            style={{
-              padding: "4px 10px",
-              border: "none",
-              borderLeft:
-                i > 0 ? "1px solid var(--color-jbp-hairline)" : "none",
-              background: active
-                ? "var(--color-jbp-ink)"
-                : "transparent",
-              color: active
-                ? "var(--color-jbp-cream)"
-                : "var(--color-jbp-text-2)",
-              fontFamily: "var(--font-mono)",
-              fontSize: 10,
-              fontWeight: active ? 700 : 600,
-              letterSpacing: 0.6,
-              cursor: "pointer",
-            }}
-          >
-            {n}W
-          </button>
-        );
-      })}
     </div>
   );
 }
