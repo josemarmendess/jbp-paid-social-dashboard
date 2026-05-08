@@ -2,10 +2,12 @@ import { NextResponse } from "next/server";
 import { currentHourCT, runDailySummary } from "@/lib/cron/runner";
 
 /**
- * Hourly cron tick. Vercel Cron is registered against this path in
- * vercel.json with `0 * * * *`. Every hour we walk the per-template
- * runners; each runner reads its own KV-backed config (toggle + hour
- * + channels) and decides whether to fire this tick.
+ * Daily cron tick. Vercel Cron is registered against this path in
+ * vercel.json with `0 22 * * *` (= 5:00 PM CT during CDT, 4:00 PM CT
+ * during CST). Hobby tier limits us to one fire per day; the runner
+ * gates each template only on the KV `enabled` toggle. When we move
+ * to Pro the schedule flips to `0 * * * *` and the runtime hour-of-day
+ * check in runner.ts wakes back up.
  *
  * The route name is kept (`cron-daily-summary`) for backwards-compat
  * with the existing Vercel Cron registration; the dispatch logic is

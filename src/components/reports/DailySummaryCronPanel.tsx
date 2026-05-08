@@ -129,7 +129,7 @@ export function DailySummaryCronPanel() {
         hint="Vercel Hobby tier fires cron once a day. To change the time, edit vercel.json and redeploy. Pro plan unlocks runtime hour control."
       >
         <div style={readOnlyBoxStyle}>
-          Daily · 19:00 CT (CDT) / 18:00 CT (CST)
+          Daily · 5:00 PM CT (CDT) / 4:00 PM CT (CST)
         </div>
       </Field>
 
