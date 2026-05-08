@@ -41,8 +41,13 @@ const FONT_REQUESTS: ReadonlyArray<{
   { family: "JetBrains Mono", weight: 700, cssToken: "JetBrains+Mono:wght@700" },
 ];
 
-const CHROME_USER_AGENT =
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+// Pre-woff2 Safari UA. Google Fonts content-negotiates on User-Agent and
+// only serves woff2 to browsers known to support it. The Satori build
+// embedded in @vercel/og 0.11.1 does NOT decode woff2 ("Unsupported
+// OpenType signature wOF2"), so we ask for an older browser and Google
+// hands us TTF, which Satori reads natively.
+const PRE_WOFF2_USER_AGENT =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_8_5) AppleWebKit/537.71 (KHTML, like Gecko) Version/7.0 Safari/537.71";
 
 let fontsPromise: Promise<FontDef[]> | null = null;
 
@@ -54,17 +59,18 @@ async function loadFonts(): Promise<FontDef[]> {
     );
     const cssUrl = `https://fonts.googleapis.com/css2?${familyParam}&display=swap`;
     const cssRes = await fetch(cssUrl, {
-      headers: { "User-Agent": CHROME_USER_AGENT },
+      headers: { "User-Agent": PRE_WOFF2_USER_AGENT },
     });
     if (!cssRes.ok) {
       throw new Error(`Google Fonts CSS fetch failed: ${cssRes.status}`);
     }
     const css = await cssRes.text();
 
-    // Each `@font-face { … src: url(https://…) format('woff2') … }` block in
-    // the CSS has the family + weight in a preceding comment-free segment.
-    // We pull out every (family, weight, url) triple and match each requested
-    // font against it.
+    // Each `@font-face { … src: url(https://…) format('truetype') … }`
+    // block has the family + weight inline. We pull out every
+    // (family, weight, url) triple and match each requested font against
+    // it. Google serves TTF (and sometimes WOFF) to the pre-woff2 UA;
+    // both are decoded by Satori.
     const faces = parseFontFaces(css);
 
     const out: FontDef[] = [];
@@ -111,8 +117,15 @@ function parseFontFaces(css: string): ParsedFace[] {
     const block = blockMatch[1];
     const familyMatch = /font-family:\s*['"]([^'"]+)['"]/.exec(block);
     const weightMatch = /font-weight:\s*(\d+)/.exec(block);
-    const urlMatch = /url\((https:\/\/[^)]+\.woff2)\)/.exec(block);
-    if (!familyMatch || !weightMatch || !urlMatch) continue;
+    // The pre-woff2 UA path on Google Fonts returns query-string URLs
+    // without a file extension (e.g. `…/font?kit=…`) and declares the
+    // format inline via `format('woff')` or `format('truetype')`. Pick
+    // up either, but reject `format('woff2')` since Satori (@vercel/og
+    // 0.11.1) can't decode it.
+    const srcMatch =
+      /src:\s*url\((https:\/\/[^)]+)\)\s*format\(['"]([^'"]+)['"]\)/.exec(block);
+    if (!familyMatch || !weightMatch || !srcMatch) continue;
+    if (srcMatch[2].toLowerCase() === "woff2") continue;
     const weight = Number(weightMatch[1]);
     if (weight !== 400 && weight !== 500 && weight !== 600 && weight !== 700 && weight !== 800) {
       continue;
@@ -120,7 +133,7 @@ function parseFontFaces(css: string): ParsedFace[] {
     out.push({
       family: familyMatch[1],
       weight: weight as FontDef["weight"],
-      url: urlMatch[1],
+      url: srcMatch[1],
     });
   }
   return out;
