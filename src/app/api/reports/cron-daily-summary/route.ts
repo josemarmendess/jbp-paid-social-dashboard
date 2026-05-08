@@ -36,14 +36,39 @@ import {
  * year-round is required.
  */
 
+// Vercel functions default to 60s on hobby / 300s on pro. The cron does
+// a no-cache Apps Script fetch (~5s) + Satori render (~5s) + 2 Slack
+// API calls — well under 60s, but set explicitly so a slower Apps Script
+// day doesn't 504 us.
+export const maxDuration = 120;
+
 // Allow GET (Vercel cron) and POST (manual debug). Both share the same
 // auth + body so you can curl the endpoint to test before the schedule
 // fires.
 export async function GET(req: Request) {
-  return run(req);
+  return wrap(req);
 }
 export async function POST(req: Request) {
-  return run(req);
+  return wrap(req);
+}
+
+async function wrap(req: Request): Promise<Response> {
+  // Outer guard: anything that escapes `run` (Lambda crashes, OOM
+  // approaching, unhandled throws) lands here as a JSON 500 instead of a
+  // bodyless 502 from Vercel's runtime.
+  try {
+    return await run(req);
+  } catch (err) {
+    console.error("[cron-daily-summary] uncaught:", err);
+    return NextResponse.json(
+      {
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined,
+      },
+      { status: 500 },
+    );
+  }
 }
 
 async function run(req: Request) {
@@ -88,6 +113,8 @@ async function run(req: Request) {
     );
   }
 
+  console.log("[cron] step=fetch start");
+  const tFetch = Date.now();
   const data = await fetchPaidSocialDataDirect();
   if (!data) {
     return NextResponse.json(
@@ -95,27 +122,38 @@ async function run(req: Request) {
       { status: 502 },
     );
   }
+  console.log(`[cron] step=fetch ok in ${Date.now() - tFetch}ms`);
 
   const dateLabel = formatDate.format(new Date());
   const config = DAILY_SUMMARY_DEFAULT_CONFIG;
   const filename = sanitizeFilename(config.title) + ".png";
 
+  console.log("[cron] step=render start");
+  const tRender = Date.now();
   let buffer: Buffer;
   try {
     buffer = await renderDailySummaryImage(data, config);
   } catch (err) {
+    console.error("[cron] step=render failed:", err);
     return NextResponse.json(
       {
         ok: false,
         error: `renderDailySummaryImage failed: ${err instanceof Error ? err.message : String(err)}`,
+        stack: err instanceof Error ? err.stack : undefined,
       },
       { status: 502 },
     );
   }
+  console.log(
+    `[cron] step=render ok in ${Date.now() - tRender}ms · ${buffer.byteLength} bytes`,
+  );
 
   try {
+    console.log("[cron] step=resolveChannel");
     const reviewerChannel = await resolveChannel(token, reviewer);
+    console.log(`[cron] reviewerChannel=${reviewerChannel}`);
 
+    console.log("[cron] step=getUploadUrl");
     const upload = await getUploadUrl(token, filename, buffer.byteLength);
     if (!upload.ok) {
       return NextResponse.json(
@@ -123,7 +161,9 @@ async function run(req: Request) {
         { status: 502 },
       );
     }
+    console.log("[cron] step=uploadBytesToSlack");
     await uploadBytesToSlack(upload.upload_url, buffer);
+    console.log("[cron] step=completeUpload");
     const complete = await completeUpload(
       token,
       upload.file_id,
@@ -177,6 +217,7 @@ async function run(req: Request) {
       },
     ];
 
+    console.log("[cron] step=postBlocks");
     const posted = await postBlocks(
       token,
       reviewerChannel,
@@ -184,12 +225,14 @@ async function run(req: Request) {
       `Daily Summary preview ready — approve to send to channel.`,
     );
     if (!posted.ok) {
+      console.error("[cron] postBlocks returned !ok:", posted);
       return NextResponse.json(
         { ok: false, error: `Slack chat.postMessage: ${posted.error ?? "unknown"}` },
         { status: 502 },
       );
     }
 
+    console.log("[cron] done");
     return NextResponse.json({ ok: true, sent: dateLabel, awaiting: "approval" });
   } catch (err) {
     return NextResponse.json(
