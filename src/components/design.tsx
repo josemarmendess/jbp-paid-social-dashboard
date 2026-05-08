@@ -423,6 +423,97 @@ export function Metric({
   );
 }
 
+/* ───────────── ServiceTag ─────────────
+ * Color-coded chip for service-category cells in tables. Different colors
+ * per service line so a long table is scannable at a glance. Falls back to
+ * neutral paper for unknown labels. */
+
+export function ServiceTag({
+  label,
+  size = "sm",
+}: {
+  label: string;
+  size?: "sm" | "md";
+}) {
+  if (!label) {
+    return (
+      <span style={{ color: "var(--color-jbp-text-3)", fontSize: 11 }}>—</span>
+    );
+  }
+  const c = serviceTagColor(label);
+  const padY = size === "md" ? 3 : 2;
+  const padX = size === "md" ? 8 : 7;
+  const fs = size === "md" ? 11 : 10;
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        padding: `${padY}px ${padX}px`,
+        background: c.bg,
+        color: c.fg,
+        fontSize: fs,
+        fontWeight: 700,
+        textTransform: "uppercase",
+        letterSpacing: 0.6,
+        fontFamily: "var(--font-mono)",
+        border: `1px solid ${c.border}`,
+      }}
+    >
+      {label}
+    </span>
+  );
+}
+
+function serviceTagColor(label: string): {
+  bg: string;
+  fg: string;
+  border: string;
+} {
+  const n = label.toLowerCase();
+  if (n.includes("bath"))
+    return {
+      bg: "rgba(26,58,92,0.08)",
+      fg: "var(--color-jbp-svc-water)",
+      border: "rgba(26,58,92,0.18)",
+    };
+  if (n.includes("sewer"))
+    return {
+      bg: "rgba(168,115,17,0.10)",
+      fg: "var(--color-jbp-svc-sewer)",
+      border: "rgba(168,115,17,0.22)",
+    };
+  if (n.includes("plumb"))
+    return {
+      bg: "rgba(74,72,66,0.08)",
+      fg: "var(--color-jbp-svc-plumbing)",
+      border: "rgba(74,72,66,0.20)",
+    };
+  if (n.includes("drain"))
+    return {
+      bg: "rgba(196,30,30,0.08)",
+      fg: "var(--color-jbp-svc-drain)",
+      border: "rgba(196,30,30,0.22)",
+    };
+  if (n.includes("emerg") || n.includes("urgent"))
+    return {
+      bg: "rgba(122,16,16,0.08)",
+      fg: "var(--color-jbp-svc-emergency)",
+      border: "rgba(122,16,16,0.22)",
+    };
+  if (n.includes("water"))
+    return {
+      bg: "rgba(26,58,92,0.08)",
+      fg: "var(--color-jbp-svc-water)",
+      border: "rgba(26,58,92,0.18)",
+    };
+  return {
+    bg: "var(--color-jbp-paper)",
+    fg: "var(--color-jbp-text-2)",
+    border: "var(--color-jbp-hairline)",
+  };
+}
+
 /* ───────────── StatusPill ───────────── */
 
 export function StatusPill({

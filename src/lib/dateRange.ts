@@ -39,8 +39,11 @@ const PRESET_LABELS: Record<DateRangePreset, string> = {
   yesterday: "Yesterday",
   this_month: "This month",
   last_month: "Last month",
+  last_3: "Last 3 days",
   last_7: "Last 7 days",
+  last_14: "Last 14 days",
   last_30: "Last 30 days",
+  last_60: "Last 60 days",
   last_90: "Last 90 days",
   custom: "Custom range",
 };
@@ -51,10 +54,13 @@ export const PRESET_OPTIONS: ReadonlyArray<{
 }> = [
   { value: "today", label: PRESET_LABELS.today },
   { value: "yesterday", label: PRESET_LABELS.yesterday },
-  { value: "this_month", label: PRESET_LABELS.this_month },
-  { value: "last_month", label: PRESET_LABELS.last_month },
+  { value: "last_3", label: PRESET_LABELS.last_3 },
   { value: "last_7", label: PRESET_LABELS.last_7 },
+  { value: "last_14", label: PRESET_LABELS.last_14 },
+  { value: "this_month", label: PRESET_LABELS.this_month },
   { value: "last_30", label: PRESET_LABELS.last_30 },
+  { value: "last_month", label: PRESET_LABELS.last_month },
+  { value: "last_60", label: PRESET_LABELS.last_60 },
   { value: "last_90", label: PRESET_LABELS.last_90 },
   { value: "custom", label: PRESET_LABELS.custom },
 ];
@@ -65,8 +71,11 @@ export function parsePreset(raw: string | undefined): DateRangePreset {
     case "yesterday":
     case "this_month":
     case "last_month":
+    case "last_3":
     case "last_7":
+    case "last_14":
     case "last_30":
+    case "last_60":
     case "last_90":
     case "custom":
       return raw;
@@ -145,10 +154,16 @@ export function getPeriod(
         previousLabel: "vs. previous month",
       };
     }
+    case "last_3":
+      return rollingWindow(yesterday, 3, PRESET_LABELS.last_3);
     case "last_7":
       return rollingWindow(yesterday, 7, PRESET_LABELS.last_7);
+    case "last_14":
+      return rollingWindow(yesterday, 14, PRESET_LABELS.last_14);
     case "last_30":
       return rollingWindow(yesterday, 30, PRESET_LABELS.last_30);
+    case "last_60":
+      return rollingWindow(yesterday, 60, PRESET_LABELS.last_60);
     case "last_90":
       return rollingWindow(yesterday, 90, PRESET_LABELS.last_90);
     case "custom":

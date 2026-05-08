@@ -10,6 +10,7 @@ import {
   Card,
   CardHeader,
   Eyebrow,
+  ServiceTag,
   SimpleKpi,
   StatusPill,
 } from "@/components/design";
@@ -24,12 +25,13 @@ import {
 import { normalizeService } from "@/lib/serviceTaxonomy";
 import { getServiceSlices, type ServiceView } from "@/lib/buFilter";
 import { appendCommonFilters, replaceQuery } from "@/lib/clientUrlState";
-import { chicagoTodayStr } from "@/lib/dateRange";
+import { chicagoTodayStr, getPeriod } from "@/lib/dateRange";
 import {
   formatCompactMoney,
   formatInt,
 } from "@/lib/format";
-import type { DateRangePreset, ServiceTitanRow } from "@/lib/types";
+import { getLastMonthRange } from "@/lib/periods";
+import type { DateRange, DateRangePreset, ServiceTitanRow } from "@/lib/types";
 
 const STALE_DAYS = 14;
 
@@ -78,6 +80,11 @@ export function PipelineClient({
     replaceQuery(sp.toString());
   }, [preset, customStart, customEnd, bu, view]);
 
+  const period = useMemo(
+    () => getPeriod(preset, customStart, customEnd),
+    [preset, customStart, customEnd],
+  );
+  const lastMonth = useMemo(() => getLastMonthRange(), []);
   const slices = useMemo(() => getServiceSlices(bu, view), [bu, view]);
   const todayStr = useMemo(() => chicagoTodayStr(), []);
 
@@ -99,16 +106,27 @@ export function PipelineClient({
         const v = normalizeService(row["Business Unit"]);
         return slice.bu.some((b) => normalizeService(b) === v);
       };
-      const rows = data.servicetitan_social_leads.filter(buMatch);
-      const stages = bucketByStage(rows);
-      const totalValue = rows.reduce(
+      // Period-scoped: stage strip + KPIs only see jobs created in the
+      // selected period. The user's instruction was to never show all-time
+      // counts unfiltered.
+      const buRows = data.servicetitan_social_leads.filter(buMatch);
+      const inPeriod = buRows.filter((r) =>
+        rowInRange(r, period.current),
+      );
+      const stages = bucketByStage(inPeriod);
+      const totalValue = inPeriod.reduce(
         (acc, r) => acc + (Number(r["Sales"]) || 0),
         0,
       );
-      const activeCount =
-        (stages.scheduled?.count ?? 0) +
-        (stages.inprogress?.count ?? 0) +
-        (stages.hold?.count ?? 0);
+      // "Pending" = Scheduled only. InProgress / Hold are tracked separately
+      // in the stage strip but excluded from the active-jobs count.
+      const pendingCount = stages.scheduled?.count ?? 0;
+      // Carryover: jobs created LAST MONTH that are still Scheduled today.
+      const carryover = buRows.filter(
+        (r) =>
+          rowInRange(r, lastMonth) &&
+          String(r["Job Status"] ?? "").trim().toLowerCase() === "scheduled",
+      ).length;
       const cancelWeekly = cancellationRateSeries(
         data.servicetitan_social_leads,
         slice.bu,
@@ -135,8 +153,9 @@ export function PipelineClient({
         slice,
         stages,
         totalValue,
-        activeCount,
-        totalRows: rows.length,
+        pendingCount,
+        carryover,
+        totalRows: inPeriod.length,
         cancelDual,
         showDual,
       };
@@ -178,7 +197,6 @@ export function PipelineClient({
         onBuChange={setBu}
         view={view}
         onViewChange={setView}
-        caption="Operational view · all-time pending pipeline"
       />
       <div
         style={{
@@ -194,7 +212,8 @@ export function PipelineClient({
             sliceLabel={slices.length > 1 ? s.slice.label : null}
             stages={s.stages}
             totalValue={s.totalValue}
-            activeCount={s.activeCount}
+            pendingCount={s.pendingCount}
+            carryover={s.carryover}
             totalRows={s.totalRows}
             atRiskCount={
               slices.length > 1
@@ -243,6 +262,12 @@ interface StageStat {
   value: number;
 }
 
+function rowInRange(row: ServiceTitanRow, range: DateRange): boolean {
+  const d = String(row["Creation Date"] ?? "");
+  if (!d) return false;
+  return d >= range.startStr && d <= range.endStr;
+}
+
 function bucketByStage(rows: ServiceTitanRow[]): Record<string, StageStat> {
   const out: Record<string, StageStat> = {};
   for (const stage of STAGE_ORDER) out[stage.key] = { count: 0, value: 0 };
@@ -267,7 +292,8 @@ function PipelineSlice({
   sliceLabel,
   stages,
   totalValue,
-  activeCount,
+  pendingCount,
+  carryover,
   totalRows,
   atRiskCount,
   cancelDual,
@@ -276,7 +302,8 @@ function PipelineSlice({
   sliceLabel: string | null;
   stages: Record<string, StageStat>;
   totalValue: number;
-  activeCount: number;
+  pendingCount: number;
+  carryover: number;
   totalRows: number;
   atRiskCount: number;
   cancelDual: DualLinePoint[];
@@ -303,7 +330,8 @@ function PipelineSlice({
           />
         </div>
       ) : null}
-      {/* 4-up KPIs */}
+      {/* 4-up KPIs — period-scoped except Carryover (which is always
+          "last month, still scheduled today"). */}
       <div
         style={{
           display: "grid",
@@ -312,19 +340,19 @@ function PipelineSlice({
         }}
       >
         <SimpleKpi
-          label="In pipeline"
-          value={formatInt(totalRows)}
-          sub="all attributed leads"
+          label="Pending (this period)"
+          value={formatInt(pendingCount)}
+          sub="scheduled, not worked yet"
         />
         <SimpleKpi
-          label="Active jobs"
-          value={formatInt(activeCount)}
-          sub="not yet sold/cancelled"
+          label="Carryover · last month"
+          value={formatInt(carryover)}
+          sub="last month leads still scheduled"
         />
         <SimpleKpi
           label="Pipeline value"
           value={formatCompactMoney(totalValue)}
-          sub="sales attributed"
+          sub={`sales for ${formatInt(totalRows)} jobs`}
         />
         <SimpleKpi
           label="At risk"
@@ -529,8 +557,8 @@ function StaleTable({ rows }: { rows: StaleBooking[] }) {
             >
               {r.daysOpen}d
             </td>
-            <td style={{ padding: "12px 14px", fontWeight: 600 }}>
-              {r.businessUnit || "—"}
+            <td style={{ padding: "12px 14px" }}>
+              <ServiceTag label={r.businessUnit} />
             </td>
             <td
               style={{

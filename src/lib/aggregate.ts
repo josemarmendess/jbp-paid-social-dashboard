@@ -1269,15 +1269,13 @@ export function aggregateByBusinessUnit(
   range: DateRange,
   bu: BusinessUnit,
 ): AggregatedBusinessUnit[] {
+  // We sum the AD-LEVEL spend straight into each BU (ads already carry a
+  // resolved canonical businessUnit). Earlier this function pro-rated
+  // total spend by lead share, which made CPL = totalSpend/totalLeads
+  // identical for every BU — visibly wrong in the table. Now CPL
+  // genuinely differs per service.
   const ads = aggregateByAd(meta, st, range);
   const byBu = new Map<string, AggregatedBusinessUnit>();
-  let totalSpend = 0;
-  for (const r of meta) {
-    if (!inRange(r.date, range)) continue;
-    totalSpend += Number(r.spend) || 0;
-  }
-  // Sum leads per ad's BU (use ad-level BU which forces "Sewer" for retargeting).
-  let totalLeads = 0;
   const buMatchAd = (adBu: string): boolean => {
     if (!bu || bu === "All") return true;
     if (Array.isArray(bu)) {
@@ -1294,15 +1292,10 @@ export function aggregateByBusinessUnit(
       agg = { businessUnit: a.businessUnit, spend: 0, leads: 0, bookedJobs: 0, sales: 0 };
       byBu.set(a.businessUnit, agg);
     }
+    agg.spend += a.spend;
     agg.leads += a.leads;
     agg.bookedJobs += a.bookedJobs;
     agg.sales += a.sales;
-    totalLeads += a.leads;
-  }
-  if (totalLeads > 0 && totalSpend > 0) {
-    for (const v of byBu.values()) {
-      v.spend = (v.leads / totalLeads) * totalSpend;
-    }
   }
   return Array.from(byBu.values()).sort((a, b) => b.sales - a.sales);
 }

@@ -128,15 +128,25 @@ export function BusinessUnitFilter({
         aria-expanded={open}
         data-pending={pending ? "true" : undefined}
         className={cn(
-          "inline-flex h-9 min-w-[160px] items-center justify-between gap-2 rounded-md border border-[color:var(--color-border-subtle)] bg-white px-3 text-[13px] font-medium text-[color:var(--color-text-primary)] transition-colors",
-          "hover:bg-[color:var(--color-surface-hover)]",
-          open && "ring-2 ring-[color:var(--color-jbp-blue)]/30",
+          "inline-flex h-8 min-w-[160px] items-center justify-between gap-2 border bg-white px-3 transition-colors",
+          "border-[color:var(--color-jbp-hairline)]",
+          "hover:bg-[color:var(--color-jbp-paper)]",
+          open && "ring-1 ring-[color:var(--color-jbp-red)]/40",
           pending && "opacity-70",
         )}
+        style={{
+          fontSize: 11,
+          fontWeight: 700,
+          fontFamily: "var(--font-mono)",
+          textTransform: "uppercase",
+          letterSpacing: 0.6,
+          color: "var(--color-jbp-text)",
+        }}
       >
         <span className="truncate">{buListLabel(value)}</span>
         <ChevronDown
-          className="h-3.5 w-3.5 text-[color:var(--color-text-tertiary)]"
+          className="h-3.5 w-3.5"
+          style={{ color: "var(--color-jbp-text-3)" }}
           aria-hidden="true"
         />
       </button>
@@ -144,7 +154,7 @@ export function BusinessUnitFilter({
         <div
           role="listbox"
           aria-multiselectable="true"
-          className="absolute right-0 top-[calc(100%+6px)] z-40 w-[240px] overflow-hidden rounded-lg border border-[color:var(--color-border-subtle)] bg-white shadow-xl"
+          className="absolute right-0 top-[calc(100%+4px)] z-40 w-[240px] border border-[color:var(--color-jbp-hairline)] bg-white"
         >
           <button
             type="button"

@@ -139,29 +139,9 @@ function SyncBadge({
     );
   }
   if (!generatedAt) return null;
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 7,
-        fontSize: 11,
-        color: "var(--color-jbp-text-2)",
-        fontFamily: "var(--font-mono)",
-      }}
-    >
-      <span
-        style={{
-          width: 7,
-          height: 7,
-          borderRadius: "50%",
-          background: "var(--color-jbp-good)",
-          display: "inline-block",
-        }}
-      />
-      <FreshnessIndicator generatedAt={generatedAt} />
-    </div>
-  );
+  // FreshnessIndicator carries its own tone-colored dot (fresh/ok/stale),
+  // so we don't double up on a redundant green dot here.
+  return <FreshnessIndicator generatedAt={generatedAt} />;
 }
 
 function UserAvatar() {

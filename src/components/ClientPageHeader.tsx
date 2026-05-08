@@ -1,7 +1,7 @@
 "use client";
 
 import { BusinessUnitFilter } from "@/components/BusinessUnitFilter";
-import { DateRangePicker } from "@/components/DateRangePicker";
+import { PeriodPicker } from "@/components/PeriodPicker";
 import { ServiceViewToggle } from "@/components/ServiceViewToggle";
 import { buListLabel, type ServiceView } from "@/lib/buFilter";
 import { getPeriod } from "@/lib/dateRange";
@@ -50,7 +50,7 @@ export function ClientPageHeader({
   const period = getPeriod(preset, customStart, customEnd);
   const captionLine =
     caption ??
-    `${period.label.toUpperCase()} · ${period.current.startStr} → ${period.current.endStr}`;
+    `${period.label.toUpperCase()} · ${period.current.startStr} → ${period.current.endStr} · VS PRIOR · ${period.previous.startStr} → ${period.previous.endStr}`;
 
   return (
     <div
@@ -124,7 +124,7 @@ export function ClientPageHeader({
           flexWrap: "wrap",
         }}
       >
-        <DateRangePicker
+        <PeriodPicker
           initial={preset}
           customStart={preset === "custom" ? customStart : undefined}
           customEnd={preset === "custom" ? customEnd : undefined}

@@ -314,14 +314,22 @@ function SliceContent({
           />
         </div>
       ) : null}
-      {/* Hero KPIs */}
+      {/* Hero KPIs — 3-up: Spend / Revenue (accent) / Spend on Revenue. */}
       <div
         style={{
           display: "grid",
-          gridTemplateColumns: "1fr 1fr",
+          gridTemplateColumns: "1fr 1fr 1fr",
           gap: 16,
         }}
       >
+        <HeroKpi
+          label="Spend"
+          value={formatCurrency(current.spend)}
+          delta={d(current.spend, previous.spend)}
+          invertDelta
+          spark={spendSpark}
+          sub={`${formatCurrency(current.costPerLead)} per lead`}
+        />
         <HeroKpi
           label="Sales Revenue"
           value={formatCompactMoney(current.sales)}
@@ -331,12 +339,15 @@ function SliceContent({
           accent
         />
         <HeroKpi
-          label="Spend"
-          value={formatCurrency(current.spend)}
-          delta={d(current.spend, previous.spend)}
+          label="Spend / Revenue"
+          value={spendOnRev != null ? `${spendOnRev.toFixed(1)}%` : "—"}
+          delta={d(current.spendOnRevenue, previous.spendOnRevenue)}
           invertDelta
-          spark={spendSpark}
-          sub={`${formatCurrency(current.costPerLead)} per lead`}
+          sub={
+            spendOnRev != null
+              ? `${(100 - spendOnRev).toFixed(1)}% margin · lower is better`
+              : "no revenue yet"
+          }
         />
       </div>
 
