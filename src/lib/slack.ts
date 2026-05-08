@@ -72,6 +72,61 @@ export async function postMessage(
   return (await res.json()) as { ok: boolean; error?: string };
 }
 
+/**
+ * Block Kit variant of chat.postMessage. `text` is the fallback shown in
+ * notifications and clients that can't render blocks; `blocks` is the
+ * structured layout (sections, actions, images, …).
+ */
+export async function postBlocks(
+  token: string,
+  channelId: string,
+  blocks: ReadonlyArray<unknown>,
+  text: string,
+): Promise<{ ok: boolean; error?: string; ts?: string }> {
+  const res = await fetch("https://slack.com/api/chat.postMessage", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json; charset=utf-8",
+    },
+    body: JSON.stringify({
+      channel: channelId,
+      blocks,
+      text,
+    }),
+  });
+  return (await res.json()) as { ok: boolean; error?: string; ts?: string };
+}
+
+/**
+ * Replace the contents of an already-posted message. Used by the
+ * interactive endpoint to swap "Approve / Cancel" for "Sent ✓" or
+ * "Cancelled ✗" once the reviewer has acted.
+ */
+export async function updateMessage(
+  token: string,
+  channelId: string,
+  ts: string,
+  text: string,
+  blocks?: ReadonlyArray<unknown>,
+): Promise<{ ok: boolean; error?: string }> {
+  const body: Record<string, unknown> = {
+    channel: channelId,
+    ts,
+    text,
+  };
+  if (blocks) body.blocks = blocks;
+  const res = await fetch("https://slack.com/api/chat.update", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json; charset=utf-8",
+    },
+    body: JSON.stringify(body),
+  });
+  return (await res.json()) as { ok: boolean; error?: string };
+}
+
 /* ──────────────── files upload (modern API) ──────────────── */
 
 interface UploadUrlResponse {

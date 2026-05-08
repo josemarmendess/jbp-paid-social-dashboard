@@ -1,27 +1,32 @@
 import { NextResponse } from "next/server";
-import {
-  computePivotMetrics,
-  type BusinessUnit,
-} from "@/lib/aggregate";
 import { fetchPaidSocialData } from "@/lib/fetchData";
-import { getPivotPeriods } from "@/lib/periods";
-import { CANONICAL_SERVICES } from "@/lib/serviceTaxonomy";
-import { postMessage, resolveChannel } from "@/lib/slack";
+import { renderDailySummaryImage } from "@/lib/reports/renderImage";
+import { DAILY_SUMMARY_DEFAULT_CONFIG } from "@/lib/reportTemplates";
+import {
+  completeUpload,
+  getUploadUrl,
+  postBlocks,
+  resolveChannel,
+  sanitizeFilename,
+  uploadBytesToSlack,
+} from "@/lib/slack";
 
 /**
  * Daily Summary cron — invoked by Vercel Cron at 19:00 America/Chicago
- * (configured in vercel.json). Builds a Slack-mrkdwn message with
- * yesterday's KPIs per service and posts it to the configured channel.
- *
- * For now this sends a TEXT-formatted summary, not the full image. The
- * image flow uses html-to-image which only runs in the browser; rendering
- * server-side requires Satori/@vercel/og + a flex-only refactor of the
- * report layout. Defer until requested.
+ * (configured in vercel.json). Renders the report PNG, uploads it to the
+ * reviewer's DM, and follows with an Approve/Cancel button message. Nothing
+ * lands in the group channel until the reviewer clicks Approve, which is
+ * handled by /api/slack/interactive.
  *
  * Env required:
- *   SLACK_BOT_TOKEN          — same bot token as the manual Send button
- *   SLACK_DAILY_CHANNEL      — destination for the cron (channel ID
- *                              preferred; falls back to SLACK_REVIEW_CHANNEL)
+ *   SLACK_BOT_TOKEN          — bot token (chat:write, chat:write.public,
+ *                              files:write, im:write).
+ *   SLACK_REVIEW_CHANNEL     — DM channel ID (`D…`) or user ID (`U…`/`W…`).
+ *                              The cron sends the review here.
+ *   SLACK_DAILY_CHANNEL      — group channel ID (`C…`/`G…`) the approved
+ *                              version gets posted to. Surfaced to the user
+ *                              in the review buttons; required for approval
+ *                              to do anything useful.
  *   CRON_SECRET              — Vercel injects this on cron invocations.
  *                              Required so manual hits to this URL get a 401.
  *
@@ -60,14 +65,24 @@ async function run(req: Request) {
   }
 
   const token = process.env.SLACK_BOT_TOKEN;
-  const destination =
-    process.env.SLACK_DAILY_CHANNEL || process.env.SLACK_REVIEW_CHANNEL;
-  if (!token || !destination) {
+  const reviewer = process.env.SLACK_REVIEW_CHANNEL;
+  const targetChannel = process.env.SLACK_DAILY_CHANNEL;
+  if (!token || !reviewer) {
     return NextResponse.json(
       {
         ok: false,
         error:
-          "Missing SLACK_BOT_TOKEN or destination (SLACK_DAILY_CHANNEL / SLACK_REVIEW_CHANNEL).",
+          "Missing SLACK_BOT_TOKEN or SLACK_REVIEW_CHANNEL — set both on Vercel.",
+      },
+      { status: 412 },
+    );
+  }
+  if (!targetChannel) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error:
+          "Missing SLACK_DAILY_CHANNEL — needed so Approve has somewhere to send.",
       },
       { status: 412 },
     );
@@ -81,70 +96,101 @@ async function run(req: Request) {
     );
   }
 
-  const periods = getPivotPeriods();
-  const yesterday = periods.find((p) => p.key === "yesterday");
-  if (!yesterday) {
-    return NextResponse.json(
-      { ok: false, error: "no yesterday period definition" },
-      { status: 500 },
-    );
-  }
-
   const dateLabel = formatDate.format(new Date());
-  const yLabel = formatDate.format(
-    new Date(`${yesterday.range.startStr}T12:00:00Z`),
-  );
+  const config = DAILY_SUMMARY_DEFAULT_CONFIG;
+  const filename = sanitizeFilename(config.title) + ".png";
 
-  const services: Array<{ key: string; label: string; bu: BusinessUnit }> = [
-    { key: "all", label: "All services", bu: [] },
-    ...CANONICAL_SERVICES.map((s) => ({
-      key: s,
-      label: s,
-      bu: [s] as BusinessUnit,
-    })),
-  ];
-
-  const lines: string[] = [];
-  lines.push(
-    `:bar_chart: *Daily Summary — KPIs per service · ${dateLabel} CT*`,
-  );
-  lines.push(`_Yesterday's numbers (${yLabel}) — auto-sent by JBP Dashboard_`);
-  lines.push("");
-
-  for (const svc of services) {
-    const m = computePivotMetrics(
-      data.meta_insights,
-      data.servicetitan_social_leads,
-      yesterday.range,
-      svc.bu,
+  let buffer: Buffer;
+  try {
+    buffer = await renderDailySummaryImage(data, config);
+  } catch (err) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: `renderDailySummaryImage failed: ${err instanceof Error ? err.message : String(err)}`,
+      },
+      { status: 502 },
     );
-    lines.push(`*${svc.label}*`);
-    lines.push(`  • Spend: ${money(m.spend)}`);
-    lines.push(`  • Leads: ${m.leads.toLocaleString("en-US")}`);
-    lines.push(`  • CPL: ${moneyOrDash(m.costPerLead, true)}`);
-    lines.push(`  • Booked: ${m.bookedJobs.toLocaleString("en-US")}`);
-    lines.push(`  • CPB: ${moneyOrDash(m.costPerBookedJob, true)}`);
-    lines.push(`  • Sales Revenue: ${money(m.revenue)}`);
-    lines.push(
-      `  • Spend / Revenue: ${pctOrDash(m.spendOnRevenue)}`,
-    );
-    lines.push(
-      `  • Avg Sale: ${moneyOrDash(m.averageSaleValue, false)}`,
-    );
-    lines.push(`  • Cancel Rate: ${pctOrDash(m.cancellationRate)}`);
-    lines.push("");
   }
 
   try {
-    const channelId = await resolveChannel(token, destination);
-    const result = await postMessage(token, channelId, lines.join("\n"));
-    if (!result.ok) {
+    const reviewerChannel = await resolveChannel(token, reviewer);
+
+    const upload = await getUploadUrl(token, filename, buffer.byteLength);
+    if (!upload.ok) {
       return NextResponse.json(
-        { ok: false, error: `Slack: ${result.error ?? "unknown"}` },
+        { ok: false, error: `Slack getUploadURLExternal: ${upload.error ?? "unknown"}` },
         { status: 502 },
       );
     }
-    return NextResponse.json({ ok: true, sent: dateLabel });
+    await uploadBytesToSlack(upload.upload_url, buffer);
+    const complete = await completeUpload(
+      token,
+      upload.file_id,
+      filename,
+      reviewerChannel,
+      `:hourglass_flowing_sand: *${config.title} preview · ${dateLabel} CT*\nApprove below to forward to <#${targetChannel}>.`,
+    );
+    if (!complete.ok) {
+      return NextResponse.json(
+        { ok: false, error: `Slack completeUploadExternal: ${complete.error ?? "unknown"}` },
+        { status: 502 },
+      );
+    }
+
+    // Follow-up message with Approve / Cancel buttons. The button value
+    // carries the target channel and the date label so the interactive
+    // endpoint can re-render and post without consulting env again.
+    const buttonValue = JSON.stringify({
+      target: targetChannel,
+      title: config.title,
+      dateLabel,
+    });
+
+    const blocks = [
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: `Send this to <#${targetChannel}>?`,
+        },
+      },
+      {
+        type: "actions",
+        block_id: "daily_summary_review",
+        elements: [
+          {
+            type: "button",
+            action_id: "approve_daily_summary",
+            style: "primary",
+            text: { type: "plain_text", text: "Approve & Send" },
+            value: buttonValue,
+          },
+          {
+            type: "button",
+            action_id: "cancel_daily_summary",
+            style: "danger",
+            text: { type: "plain_text", text: "Cancel" },
+            value: buttonValue,
+          },
+        ],
+      },
+    ];
+
+    const posted = await postBlocks(
+      token,
+      reviewerChannel,
+      blocks,
+      `Daily Summary preview ready — approve to send to channel.`,
+    );
+    if (!posted.ok) {
+      return NextResponse.json(
+        { ok: false, error: `Slack chat.postMessage: ${posted.error ?? "unknown"}` },
+        { status: 502 },
+      );
+    }
+
+    return NextResponse.json({ ok: true, sent: dateLabel, awaiting: "approval" });
   } catch (err) {
     return NextResponse.json(
       { ok: false, error: err instanceof Error ? err.message : "send failed" },
@@ -160,20 +206,3 @@ const formatDate = new Intl.DateTimeFormat("en-US", {
   day: "numeric",
   year: "numeric",
 });
-
-function money(n: number): string {
-  if (!Number.isFinite(n)) return "—";
-  return "$" + Math.round(n).toLocaleString("en-US");
-}
-
-function moneyOrDash(n: number | null, precise: boolean): string {
-  if (n == null || !Number.isFinite(n)) return "—";
-  return precise
-    ? "$" + n.toFixed(2)
-    : "$" + Math.round(n).toLocaleString("en-US");
-}
-
-function pctOrDash(n: number | null): string {
-  if (n == null || !Number.isFinite(n)) return "—";
-  return n.toFixed(1) + "%";
-}
