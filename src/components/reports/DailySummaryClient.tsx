@@ -14,6 +14,7 @@ import { Eyebrow } from "@/components/design";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { usePaidSocialData } from "@/components/PaidSocialDataProvider";
 import { DailySummaryReport } from "@/components/reports/DailySummaryReport";
+import { DailySummaryCronPanel } from "@/components/reports/DailySummaryCronPanel";
 import { ReportCustomizer } from "@/components/reports/ReportCustomizer";
 import {
   loadDailySummaryConfig,
@@ -358,6 +359,7 @@ export function DailySummaryClient({
               update({ ...config, slackDestination })
             }
           />
+          <DailySummaryCronPanel />
         </div>
         <div>
           <Eyebrow style={{ marginBottom: 8 }}>Preview</Eyebrow>
