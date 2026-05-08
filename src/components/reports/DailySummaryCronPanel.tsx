@@ -116,26 +116,21 @@ export function DailySummaryCronPanel() {
         label={draft.enabled ? "On" : "Off"}
         sub={
           draft.enabled
-            ? `Fires daily at ${formatHour(draft.hourCT)} CT`
+            ? "Fires once a day on the schedule below."
             : "Cron is paused — no preview will be sent."
         }
         checked={draft.enabled}
         onChange={(checked) => patch({ enabled: checked })}
       />
 
-      {/* Hour picker */}
-      <Field label="Send at (America/Chicago)">
-        <select
-          value={draft.hourCT}
-          onChange={(e) => patch({ hourCT: Number(e.target.value) })}
-          style={selectStyle}
-        >
-          {Array.from({ length: 24 }, (_, h) => (
-            <option key={h} value={h}>
-              {formatHour(h)}
-            </option>
-          ))}
-        </select>
+      {/* Schedule (read-only on Hobby tier) */}
+      <Field
+        label="Schedule"
+        hint="Vercel Hobby tier fires cron once a day. To change the time, edit vercel.json and redeploy. Pro plan unlocks runtime hour control."
+      >
+        <div style={readOnlyBoxStyle}>
+          Daily · 19:00 CT (CDT) / 18:00 CT (CST)
+        </div>
       </Field>
 
       {/* Channels */}
@@ -451,6 +446,16 @@ const inputStyle: React.CSSProperties = {
 const selectStyle: React.CSSProperties = {
   ...inputStyle,
   cursor: "pointer",
+};
+
+const readOnlyBoxStyle: React.CSSProperties = {
+  width: "100%",
+  padding: "6px 8px",
+  fontSize: 12,
+  fontFamily: "var(--font-mono)",
+  background: "var(--color-jbp-paper)",
+  border: "1px solid var(--color-jbp-hairline)",
+  color: "var(--color-jbp-text-2)",
 };
 
 const setupBannerStyle: React.CSSProperties = {

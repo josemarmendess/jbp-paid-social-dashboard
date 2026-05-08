@@ -77,9 +77,10 @@ export async function runDailySummary(
     if (!config.enabled) {
       return { ok: true, skipped: "disabled" };
     }
-    if (currentHourCT() !== config.hourCT) {
-      return { ok: true, skipped: `hour-mismatch (${config.hourCT})` };
-    }
+    // Note: hour-of-day gating lives in vercel.json (Hobby tier only
+    // supports one-fire-per-day crons). Once we upgrade to Pro the
+    // schedule moves to `0 * * * *` and we re-enable the runtime hour
+    // check via `currentHourCT() !== config.hourCT`.
   }
 
   const token = process.env.SLACK_BOT_TOKEN;
