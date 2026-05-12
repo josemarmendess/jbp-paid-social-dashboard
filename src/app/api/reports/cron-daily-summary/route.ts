@@ -3,8 +3,9 @@ import { currentHourCT, runDailySummary } from "@/lib/cron/runner";
 
 /**
  * Daily cron tick. Vercel Cron is registered against this path in
- * vercel.json with `0 22 * * *` (= 5:00 PM CT during CDT, 4:00 PM CT
- * during CST). Hobby tier limits us to one fire per day; the runner
+ * vercel.json with `0 21 * * *` (= 4:00 PM CT during CDT, 3:00 PM CT
+ * during CST, = 6:00 PM BRT). Hobby tier limits us to one fire per
+ * day; the runner
  * gates each template only on the KV `enabled` toggle. When we move
  * to Pro the schedule flips to `0 * * * *` and the runtime hour-of-day
  * check in runner.ts wakes back up.

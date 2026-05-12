@@ -179,4 +179,99 @@
     text-transform: uppercase;
     color: var(--color-jbp-text-2);
   }
+
+  /* ─── motion ─────────────────────────────────────────── */
+
+  /* Apply automatically to every <main> in App Router — the route
+     content fades up while the data resolves so navigation feels
+     responsive instead of janky.  Skeletons (which use animate-pulse
+     instead) bypass this. */
+  main {
+    animation: jbp-fade-up 220ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  }
+
+  /* Softer fade for cards / sections nested inside main — staggers
+     visually because the parent animation runs first. */
+  .fade-in {
+    animation: jbp-fade-in 240ms ease-out both;
+  }
+
+  /* Subtle scale-in for popovers, toasts, dropdowns. */
+  .pop-in {
+    animation: jbp-pop-in 160ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  }
+
+  /* Smooth size/opacity transition on every button + link to make
+     clicks feel tactile.  Tailwind classes can still override per-
+     element. */
+  button,
+  a {
+    transition: background-color 120ms ease, color 120ms ease,
+      border-color 120ms ease, opacity 120ms ease, transform 80ms ease;
+  }
+  button:active:not(:disabled),
+  a:active {
+    transform: translateY(1px);
+  }
+
+  /* Spinner for inline busy states. Used by the cron panel's
+     "Send preview now" button and any future async action. */
+  .spinner {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border: 1.5px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: jbp-spin 700ms linear infinite;
+    vertical-align: -2px;
+  }
+
+  @keyframes jbp-fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @keyframes jbp-fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes jbp-pop-in {
+    from {
+      opacity: 0;
+      transform: scale(0.96);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+  @keyframes jbp-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  /* Respect users who've opted out of motion. */
+  @media (prefers-reduced-motion: reduce) {
+    main,
+    .fade-in,
+    .pop-in,
+    .spinner {
+      animation: none !important;
+    }
+    button,
+    a {
+      transition: none !important;
+    }
+  }
 }

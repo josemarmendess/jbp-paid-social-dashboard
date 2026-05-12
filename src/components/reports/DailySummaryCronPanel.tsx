@@ -129,7 +129,7 @@ export function DailySummaryCronPanel() {
         hint="Vercel Hobby tier fires cron once a day. To change the time, edit vercel.json and redeploy. Pro plan unlocks runtime hour control."
       >
         <div style={readOnlyBoxStyle}>
-          Daily · 5:00 PM CT (CDT) / 4:00 PM CT (CST)
+          Daily · 4:00 PM CT (CDT) / 3:00 PM CT (CST) · 6:00 PM BRT
         </div>
       </Field>
 
@@ -169,8 +169,14 @@ export function DailySummaryCronPanel() {
           primary
         />
         <PanelButton
-          icon={<Play className="h-3.5 w-3.5" />}
-          label={busy ? "Working…" : "Send preview now"}
+          icon={
+            busy ? (
+              <span className="spinner" aria-hidden />
+            ) : (
+              <Play className="h-3.5 w-3.5" />
+            )
+          }
+          label={busy ? "Sending…" : "Send preview now"}
           disabled={busy}
           onClick={handleSendNow}
         />
