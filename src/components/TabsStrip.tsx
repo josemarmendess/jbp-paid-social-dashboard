@@ -16,9 +16,13 @@ const TABS: ReadonlyArray<{ href: string; label: string }> = [
 ];
 
 /**
- * Horizontal tab strip — replaces the old vertical sidebar. Active tab
- * shows a 2px red underline. Filter URL params persist across nav so
- * date/BU don't reset when the user clicks a tab.
+ * Horizontal tab strip — primary app navigation. Active tab carries a
+ * 2px red underline; inactive tabs show a 2px transparent underline
+ * that fades to 60%-red on hover (preview of the active state) and
+ * the label darkens. Hover CSS lives in globals.css under
+ * `.tabs-strip-link` so we don't need onMouseEnter handlers in JSX.
+ * Filter URL params persist across nav so date/BU don't reset when
+ * the user clicks a tab.
  */
 export function TabsStrip() {
   const pathname = usePathname() ?? "/";
@@ -46,23 +50,8 @@ export function TabsStrip() {
             key={t.href}
             href={`${t.href}${qs}`}
             aria-current={active ? "page" : undefined}
-            style={{
-              padding: "13px 16px",
-              borderBottom: active
-                ? "2px solid var(--color-jbp-red)"
-                : "2px solid transparent",
-              color: active
-                ? "var(--color-jbp-text)"
-                : "var(--color-jbp-text-2)",
-              fontWeight: active ? 700 : 500,
-              fontSize: 13,
-              fontFamily: "var(--font-sans)",
-              letterSpacing: "-0.005em",
-              marginBottom: -1,
-              whiteSpace: "nowrap",
-              textDecoration: "none",
-              transition: "color .12s",
-            }}
+            data-active={active ? "true" : undefined}
+            className="tabs-strip-link no-underline"
           >
             {t.label}
           </Link>

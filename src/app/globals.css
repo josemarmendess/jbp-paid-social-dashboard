@@ -308,6 +308,43 @@
     box-shadow: 0 1px 3px rgba(26, 20, 16, 0.05);
   }
 
+  /* Primary top-nav tabs (TabsStrip). Active = solid red 2px
+     underline, label is ink-bold. Inactive = transparent underline
+     that fades to 60%-red on hover, label darkens and bumps up 1px
+     so the click feels tactile. */
+  .tabs-strip-link {
+    padding: 13px 16px;
+    font-size: 13px;
+    font-family: var(--font-sans);
+    letter-spacing: -0.005em;
+    font-weight: 500;
+    color: var(--color-jbp-text-2);
+    white-space: nowrap;
+    margin-bottom: -1px;
+    border-bottom: 2px solid transparent;
+    transition:
+      color 140ms ease,
+      border-color 140ms ease,
+      background-color 140ms ease,
+      transform 100ms ease;
+  }
+  .tabs-strip-link:hover {
+    color: var(--color-jbp-text);
+    border-bottom-color: rgba(196, 30, 30, 0.55);
+    background-color: rgba(196, 30, 30, 0.04);
+    transform: translateY(-1px);
+  }
+  .tabs-strip-link:active {
+    transform: translateY(0);
+  }
+  .tabs-strip-link[data-active="true"] {
+    color: var(--color-jbp-text);
+    font-weight: 700;
+    border-bottom-color: var(--color-jbp-red);
+    background-color: transparent;
+    transform: none;
+  }
+
   /* Table-row hover — subtle paper tint, full-width.  Add `row-hover`
      to <tr> or any row container that should highlight on hover. */
   .row-hover {
