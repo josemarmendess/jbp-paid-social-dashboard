@@ -1,3 +1,5 @@
+import type { DailySummaryConfig } from "@/lib/reportTemplates";
+
 /**
  * Plain types + defaults for the cron config. Lives in a separate module
  * (no "server-only") so client components can import the shape without
@@ -28,6 +30,14 @@ export interface CronConfig {
   lastSentAt: string | null;
   /** Last failure message (most recent run that errored). null if last run was clean or never ran. */
   lastError: string | null;
+  /**
+   * Snapshot of the customizer state at the most recent client-side
+   * Save. Null = no save yet, fall back to DAILY_SUMMARY_DEFAULT_CONFIG.
+   * Persisted to KV by saveDailySummaryReportConfigAction so the cron
+   * (which runs server-side and can't see localStorage) renders with
+   * the operator's most recent layout/services/metrics.
+   */
+  reportConfig: DailySummaryConfig | null;
 }
 
 export const DEFAULT_CRON_CONFIG: CronConfig = {
@@ -37,4 +47,5 @@ export const DEFAULT_CRON_CONFIG: CronConfig = {
   targetChannel: "",
   lastSentAt: null,
   lastError: null,
+  reportConfig: null,
 };

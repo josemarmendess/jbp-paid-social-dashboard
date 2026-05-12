@@ -9,6 +9,7 @@ import {
   type CronConfig,
 } from "@/lib/cron/storage";
 import { runDailySummary, type RunResult } from "@/lib/cron/runner";
+import type { DailySummaryConfig } from "@/lib/reportTemplates";
 
 /**
  * Server actions backing the Daily Summary cron control panel. Each
@@ -57,4 +58,27 @@ export async function saveDailySummaryCronAction(
 
 export async function sendDailySummaryNowAction(): Promise<RunResult> {
   return runDailySummary({ force: true });
+}
+
+/**
+ * Mirror the customizer's saved DailySummaryConfig to KV so the cron
+ * (and "Send preview now") renders with the operator's most recent
+ * layout. Called by DailySummaryClient's Save button alongside the
+ * existing localStorage save.
+ *
+ * Returns { ok: true } even when KV isn't configured (no-op) so the
+ * client save flow doesn't break on a missing Upstash setup — the
+ * localStorage save still works, and the cron will fall back to
+ * DAILY_SUMMARY_DEFAULT_CONFIG.
+ */
+export async function saveDailySummaryReportConfigAction(
+  reportConfig: DailySummaryConfig,
+): Promise<{ ok: boolean; configured: boolean }> {
+  if (!isCronStorageConfigured()) {
+    return { ok: true, configured: false };
+  }
+  const prior = await getCronConfig("daily-summary");
+  const next: CronConfig = { ...prior, reportConfig };
+  const ok = await setCronConfig("daily-summary", next);
+  return { ok, configured: true };
 }

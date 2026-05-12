@@ -118,7 +118,10 @@ export async function runDailySummary(
   }
 
   const dateLabel = formatDate.format(new Date());
-  const reportConfig = DAILY_SUMMARY_DEFAULT_CONFIG;
+  // Use the operator's most recently saved customizer state (mirrored
+  // to KV by saveDailySummaryReportConfigAction). Falls back to the
+  // built-in default when no save has happened yet.
+  const reportConfig = config.reportConfig ?? DAILY_SUMMARY_DEFAULT_CONFIG;
   const filename = sanitizeFilename(reportConfig.title) + ".png";
 
   let buffer: Buffer;

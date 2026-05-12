@@ -88,16 +88,22 @@ export function Sidebar() {
               href={`${item.href}${qs}`}
               aria-current={active ? "page" : undefined}
               className={[
-                "group relative flex items-center gap-2.5 rounded-md px-3 py-2 text-[13px] transition-colors",
+                "group relative flex items-center gap-2.5 rounded-md px-3 py-2 text-[13px] no-underline",
+                "transition-[background-color,color,transform] duration-150",
                 active
                   ? "bg-[color:var(--color-surface-hover)] font-medium text-[color:var(--color-text-primary)]"
-                  : "text-[color:var(--color-text-secondary)] hover:bg-[color:var(--color-surface-hover)]/60 hover:text-[color:var(--color-text-primary)]",
+                  : "text-[color:var(--color-text-secondary)] hover:bg-[color:var(--color-surface-hover)] hover:text-[color:var(--color-text-primary)] hover:translate-x-[1px]",
               ].join(" ")}
             >
-              {active && (
+              {active ? (
                 <span
                   aria-hidden="true"
                   className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-r-full bg-[color:var(--color-jbp-red)]"
+                />
+              ) : (
+                <span
+                  aria-hidden="true"
+                  className="absolute left-0 top-2.5 bottom-2.5 w-[3px] rounded-r-full bg-[color:var(--color-jbp-red)] opacity-0 transition-opacity duration-150 group-hover:opacity-60"
                 />
               )}
               <item.Icon

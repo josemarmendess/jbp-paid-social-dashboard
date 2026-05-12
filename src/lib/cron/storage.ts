@@ -112,5 +112,6 @@ export function normaliseCronConfig(input: Partial<CronConfig>): CronConfig {
     targetChannel: (merged.targetChannel ?? "").trim(),
     lastSentAt: merged.lastSentAt ?? null,
     lastError: merged.lastError ?? null,
+    reportConfig: merged.reportConfig ?? null,
   };
 }

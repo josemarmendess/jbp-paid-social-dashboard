@@ -14,6 +14,7 @@ import { Eyebrow } from "@/components/design";
 import { ErrorBanner } from "@/components/ErrorBanner";
 import { usePaidSocialData } from "@/components/PaidSocialDataProvider";
 import { DailySummaryReport } from "@/components/reports/DailySummaryReport";
+import { saveDailySummaryReportConfigAction } from "@/app/reports/daily-summary/actions";
 import { DailySummaryCronPanel } from "@/components/reports/DailySummaryCronPanel";
 import { ReportCustomizer } from "@/components/reports/ReportCustomizer";
 import {
@@ -87,9 +88,17 @@ export function DailySummaryClient({
   }
 
   function handleSave() {
+    // Save locally first so the next page render keeps the user's
+    // customizations even if the server hop below fails.
     saveDailySummaryConfig(config);
     setDirty(false);
     flashToast("Saved");
+    // Mirror to KV so the cron + "Send preview now" pick up the new
+    // layout. Fire-and-forget — the toast already confirmed local save
+    // and the action degrades to no-op when Upstash isn't connected.
+    void saveDailySummaryReportConfigAction(config).catch((err) => {
+      console.warn("[daily-summary] KV mirror failed:", err);
+    });
   }
 
   function handleReset() {
