@@ -270,8 +270,90 @@
       animation: none !important;
     }
     button,
-    a {
+    a,
+    .card-hover,
+    .row-hover {
       transition: none !important;
     }
+    .card-hover:hover,
+    button:hover:not(:disabled),
+    a:hover {
+      transform: none !important;
+    }
+  }
+
+  /* ─── hover affordances ───────────────────────────── */
+
+  /* Clickable card — lifts 1px, border tints to JBP red, soft shadow
+     grows. Applied automatically to .report-template-card; opt-in
+     elsewhere via the `.card-hover` class. */
+  .card-hover,
+  .report-template-card {
+    transition:
+      transform 140ms cubic-bezier(0.2, 0.7, 0.2, 1),
+      border-color 140ms ease,
+      box-shadow 140ms ease,
+      background-color 140ms ease;
+    will-change: transform;
+  }
+  .card-hover:hover,
+  .report-template-card:hover {
+    transform: translateY(-1px);
+    border-color: var(--color-jbp-red);
+    box-shadow: 0 3px 10px rgba(26, 20, 16, 0.06);
+  }
+  .card-hover:active,
+  .report-template-card:active {
+    transform: translateY(0);
+    box-shadow: 0 1px 3px rgba(26, 20, 16, 0.05);
+  }
+
+  /* Table-row hover — subtle paper tint, full-width.  Add `row-hover`
+     to <tr> or any row container that should highlight on hover. */
+  .row-hover {
+    transition: background-color 100ms ease;
+  }
+  .row-hover:hover {
+    background-color: var(--color-jbp-paper);
+  }
+
+  /* Buttons with a non-transparent background get a brightness lift
+     on hover.  Custom-styled inline buttons (cron panel, action bar)
+     all benefit without explicit hover rules. */
+  button:hover:not(:disabled) {
+    filter: brightness(0.97);
+  }
+  button:active:not(:disabled) {
+    filter: brightness(0.93);
+  }
+
+  /* Link hover — keep the underline subtle on text links, no decoration
+     on icon/card links. */
+  a:not(.no-underline):hover {
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  /* Form focus state — JBP red ring instead of the browser default
+     blue.  Applies to text inputs, selects, and textareas globally. */
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
+    outline: 2px solid var(--color-jbp-red);
+    outline-offset: 1px;
+    transition: outline-color 120ms ease;
+  }
+
+  /* Inputs/selects also get a soft border tint on hover so the user
+     sees the field is interactive. */
+  input,
+  select,
+  textarea {
+    transition: border-color 120ms ease, background-color 120ms ease;
+  }
+  input:hover:not(:disabled),
+  select:hover:not(:disabled),
+  textarea:hover:not(:disabled) {
+    border-color: var(--color-jbp-text-2);
   }
 }
