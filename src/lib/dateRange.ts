@@ -195,7 +195,10 @@ function getPeriodBase(
     }
     case "this_month": {
       const curStart = startOfMonth(today);
-      const curEnd = yesterday;
+      // Include today's partial-day numbers — operators want live MTD,
+      // not a stale "month minus 1 day" view. Closed past-only windows
+      // live under last_3 / last_7 / last_30 / last_month.
+      const curEnd = today;
       const prevStart = subMonths(curStart, 1);
       const prevEndOfMonth = endOfMonth(prevStart);
       const prevEnd = setDate(

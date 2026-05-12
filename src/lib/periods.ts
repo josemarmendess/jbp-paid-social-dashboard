@@ -53,9 +53,10 @@ export interface PeriodColumn {
  * Pivot column ranges. Aligned 1:1 with the KPI date-filter presets in
  * `dateRange.ts` so each column equals what the user sees in the KPI cards
  * when that preset is selected:
- *  - Last Month / Month to Date / Last N Days are CLOSED windows that end
- *    yesterday (today is excluded — Meta + ServiceTitan numbers still shift
- *    on the current day, so closed windows stay stable).
+ *  - Last Month / Last N Days are CLOSED windows that end yesterday — past
+ *    days only, so the numbers don't shift as the current day fills in.
+ *  - Month to Date INCLUDES today — operators expect to see partial-day
+ *    progress for the current month.
  *  - Yesterday / Today are single-day open windows.
  */
 export function getPivotPeriods(): PeriodColumn[] {
@@ -64,7 +65,6 @@ export function getPivotPeriods(): PeriodColumn[] {
   const lastMonthAnchor = subMonths(today, 1);
   const lastMonthStart = startOfMonth(lastMonthAnchor);
   const lastMonthEnd = endOfMonth(lastMonthAnchor);
-  const mtdEnd = yesterday >= startOfMonth(today) ? yesterday : startOfMonth(today);
   return [
     {
       key: "last_month",
@@ -74,8 +74,9 @@ export function getPivotPeriods(): PeriodColumn[] {
     {
       key: "month_to_date",
       label: "Month to Date",
-      // Matches the KPI "this_month" preset: 1st of month → yesterday.
-      range: { startStr: ymd(startOfMonth(today)), endStr: ymd(mtdEnd) },
+      // 1st of month → today, inclusive. Today's partial-day numbers
+      // are intentional (operators want to see current MTD).
+      range: { startStr: ymd(startOfMonth(today)), endStr: ymd(today) },
     },
     {
       key: "last_30",
