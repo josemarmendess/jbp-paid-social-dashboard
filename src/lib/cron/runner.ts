@@ -13,6 +13,7 @@ import {
 import {
   getCronConfig,
   setCronConfig,
+  setPreviewBuffer,
   type CronConfig,
 } from "./storage";
 
@@ -133,6 +134,12 @@ export async function runDailySummary(
       error: `render failed: ${err instanceof Error ? err.message : String(err)}`,
     });
   }
+
+  // Cache the exact bytes so the Approve handler can re-upload them
+  // verbatim to the target channel — guarantees the operator's
+  // approved version IS what the team receives, with no data drift
+  // or config mismatch in the interim.
+  await setPreviewBuffer(templateId, buffer);
 
   try {
     const reviewerCh = await resolveChannel(token, reviewer);

@@ -98,6 +98,52 @@ export async function setCronConfig(
   }
 }
 
+/* ──────────────── preview buffer cache ──────────────── */
+
+/**
+ * Cache the rendered PNG so the Approve handler in /api/slack/interactive
+ * can re-upload the EXACT bytes the reviewer saw, instead of re-rendering
+ * (which would pick up fresher data + still-hardcoded DEFAULT_CONFIG).
+ *
+ * Stored as base64 in KV with a TTL — default 12h matches the typical
+ * window between cron fire and operator approval. Returns false when KV
+ * isn't configured; callers fall back to re-render in that case.
+ */
+export async function setPreviewBuffer(
+  id: ReportTemplateId,
+  buffer: Buffer,
+  ttlSeconds: number = 12 * 60 * 60,
+): Promise<boolean> {
+  const c = client();
+  if (!c) return false;
+  try {
+    await c.set(`preview:${id}`, buffer.toString("base64"), { ex: ttlSeconds });
+    return true;
+  } catch (err) {
+    console.warn(
+      `[cron-storage] setPreviewBuffer failed for ${id}: ${err instanceof Error ? err.message : err}`,
+    );
+    return false;
+  }
+}
+
+export async function getPreviewBuffer(
+  id: ReportTemplateId,
+): Promise<Buffer | null> {
+  const c = client();
+  if (!c) return null;
+  try {
+    const b64 = await c.get<string>(`preview:${id}`);
+    if (!b64) return null;
+    return Buffer.from(b64, "base64");
+  } catch (err) {
+    console.warn(
+      `[cron-storage] getPreviewBuffer failed for ${id}: ${err instanceof Error ? err.message : err}`,
+    );
+    return null;
+  }
+}
+
 /** Clamp + sanitise user input before persisting. Used by the server action. */
 export function normaliseCronConfig(input: Partial<CronConfig>): CronConfig {
   const merged = { ...DEFAULT_CRON_CONFIG, ...input };

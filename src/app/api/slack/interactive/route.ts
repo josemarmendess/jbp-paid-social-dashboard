@@ -1,6 +1,7 @@
 import { after } from "next/server";
 import { NextResponse } from "next/server";
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { getCronConfig, getPreviewBuffer } from "@/lib/cron/storage";
 import { fetchPaidSocialDataDirect } from "@/lib/fetchData";
 import { renderDailySummaryImage } from "@/lib/reports/renderImage";
 import { DAILY_SUMMARY_DEFAULT_CONFIG } from "@/lib/reportTemplates";
@@ -133,13 +134,21 @@ export async function POST(req: Request) {
   const approverName = payload.user?.name ?? payload.user?.id ?? "approver";
   after(async () => {
     try {
-      const data = await fetchPaidSocialDataDirect();
-      if (!data) throw new Error("fetchPaidSocialDataDirect returned null");
-
-      const buffer = await renderDailySummaryImage(
-        data,
-        DAILY_SUMMARY_DEFAULT_CONFIG,
-      );
+      // 1. Prefer the cached buffer captured at cron-fire time. This
+      //    guarantees the bytes the reviewer approved match what the
+      //    team receives — no data drift, no config mismatch.
+      // 2. Fallback: re-render using the operator's saved
+      //    reportConfig in KV (NOT the hardcoded default) when the
+      //    cache has expired or never populated.
+      let buffer = await getPreviewBuffer("daily-summary");
+      if (!buffer) {
+        const data = await fetchPaidSocialDataDirect();
+        if (!data) throw new Error("fetchPaidSocialDataDirect returned null");
+        const cron = await getCronConfig("daily-summary");
+        const reportConfig =
+          cron.reportConfig ?? DAILY_SUMMARY_DEFAULT_CONFIG;
+        buffer = await renderDailySummaryImage(data, reportConfig);
+      }
       const filename = sanitizeFilename(value.title) + ".png";
       const upload = await getUploadUrl(token, filename, buffer.byteLength);
       if (!upload.ok) {
