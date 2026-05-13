@@ -77,6 +77,39 @@ export async function fetchPaidSocialData(): Promise<PaidSocialPayload | null> {
 }
 
 /**
+ * Pre-warm hit invoked by `refreshDataAction` before invalidating the
+ * Next cache. Tells Apps Script to bypass its own CacheService (the
+ * script needs to read `e.parameter.refresh` and skip its cached
+ * payload) so that the very next `fetchPaidSocialData` lands a fresh
+ * MISS with current numbers from Meta + ServiceTitan.
+ *
+ * The response itself is discarded — we just want to trigger the
+ * recompute upstream. Failures are swallowed: the Next cache
+ * invalidation will still happen and the dashboard will display
+ * whatever Apps Script returns next.
+ */
+export async function refreshAppsScriptCache(): Promise<boolean> {
+  const baseUrl = process.env.APPS_SCRIPT_URL;
+  const token = process.env.APPS_SCRIPT_TOKEN;
+  if (!baseUrl || !token) return false;
+  const url = new URL(baseUrl);
+  url.searchParams.set("token", token);
+  url.searchParams.set("refresh", "1");
+  try {
+    const res = await fetch(url.toString(), {
+      cache: "no-store",
+      redirect: "follow",
+    });
+    return res.ok;
+  } catch (err) {
+    console.warn(
+      `[paid-social] refresh hint failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return false;
+  }
+}
+
+/**
  * Uncached variant used by the daily cron + Slack interactive endpoint.
  * The Apps Script payload outgrew Next's 2MB Data Cache ceiling, so the
  * cached path throws on big responses. These code paths run rarely (once

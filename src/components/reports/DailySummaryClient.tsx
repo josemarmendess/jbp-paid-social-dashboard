@@ -1,14 +1,17 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import {
   Copy,
   Download,
   FileText,
+  RefreshCw,
   RotateCcw,
   Save,
   Send,
 } from "lucide-react";
+import { refreshDataAction } from "@/app/actions";
 import { ClientPageHeader } from "@/components/ClientPageHeader";
 import { Eyebrow } from "@/components/design";
 import { ErrorBanner } from "@/components/ErrorBanner";
@@ -81,6 +84,19 @@ export function DailySummaryClient({
   // Save button's enabled/disabled state.
   const [dirty, setDirty] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+
+  // Refresh-data state — shared with the action bar button. Uses the
+  // global refreshDataAction so it also pings Apps Script with
+  // ?refresh=1 to bypass the upstream CacheService.
+  const router = useRouter();
+  const [refreshing, startRefresh] = useTransition();
+  function handleRefreshData() {
+    startRefresh(async () => {
+      await refreshDataAction();
+      router.refresh();
+      flashToast("Data refreshed");
+    });
+  }
 
   function update(next: DailySummaryConfig) {
     setConfig(next);
@@ -292,6 +308,26 @@ export function DailySummaryClient({
           icon={<RotateCcw className="h-3.5 w-3.5" />}
           label="Reset"
           onClick={handleReset}
+        />
+        <span
+          style={{
+            width: 1,
+            height: 20,
+            background: "var(--color-jbp-hairline)",
+            margin: "0 4px",
+          }}
+        />
+        <ActionButton
+          icon={
+            refreshing ? (
+              <span className="spinner" aria-hidden />
+            ) : (
+              <RefreshCw className="h-3.5 w-3.5" />
+            )
+          }
+          label={refreshing ? "Refreshing…" : "Refresh data"}
+          onClick={handleRefreshData}
+          disabled={refreshing}
         />
         <span
           style={{
