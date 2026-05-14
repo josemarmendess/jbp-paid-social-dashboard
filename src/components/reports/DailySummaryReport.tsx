@@ -66,7 +66,12 @@ export const DailySummaryReport = forwardRef<
   }, [ts]);
 
   // Map period keys → DateRange via the canonical pivot period builder.
-  const pivotPeriods = useMemo(() => getPivotPeriods(), []);
+  // Keyed off `ts` (the payload's generated_at) rather than `[]` so the
+  // ranges recompute whenever data refreshes — an empty deps array froze
+  // "Today"/"Yesterday" at component-mount time, so a refresh (which
+  // re-fetches data but does NOT remount the client component) left the
+  // columns pointing at a stale calendar date.
+  const pivotPeriods = useMemo(() => getPivotPeriods(), [ts]);
   const periodByKey = useMemo(() => {
     const out: Record<string, (typeof pivotPeriods)[number]> = {};
     for (const p of pivotPeriods) out[p.key] = p;
