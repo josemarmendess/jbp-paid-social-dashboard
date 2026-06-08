@@ -1,6 +1,7 @@
 import "server-only";
 import { fetchPaidSocialDataDirect } from "@/lib/fetchData";
 import { renderDailySummaryImage } from "@/lib/reports/renderImage";
+import { buildDailySummaryText } from "@/lib/reports/slackTextSummary";
 import { DAILY_SUMMARY_DEFAULT_CONFIG } from "@/lib/reportTemplates";
 import {
   completeUpload,
@@ -141,6 +142,11 @@ export async function runDailySummary(
   // or config mismatch in the interim.
   await setPreviewBuffer(templateId, buffer);
 
+  // Text summary that mirrors the hero column of the image — same metric
+  // list, "All services" only — so reviewers can scan the numbers without
+  // opening the PNG. Falls back to an empty string when no metrics resolve.
+  const summaryText = buildDailySummaryText(data, reportConfig);
+
   try {
     const reviewerCh = await resolveChannel(token, reviewer);
     const upload = await getUploadUrl(token, filename, buffer.byteLength);
@@ -151,12 +157,19 @@ export async function runDailySummary(
       });
     }
     await uploadBytesToSlack(upload.upload_url, buffer);
+    const completeCaption = [
+      `:hourglass_flowing_sand: *${reportConfig.title} preview · ${dateLabel} CT*`,
+      `Approve below to forward to <#${targetChannel}>.`,
+      summaryText ? `\n${summaryText}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
     const complete = await completeUpload(
       token,
       upload.file_id,
       filename,
       reviewerCh,
-      `:hourglass_flowing_sand: *${reportConfig.title} preview · ${dateLabel} CT*\nApprove below to forward to <#${targetChannel}>.`,
+      completeCaption,
     );
     if (!complete.ok) {
       return await persist(templateId, config, {
@@ -171,6 +184,15 @@ export async function runDailySummary(
       dateLabel,
     });
     const blocks = [
+      ...(summaryText
+        ? [
+            {
+              type: "section",
+              text: { type: "mrkdwn", text: summaryText },
+            },
+            { type: "divider" },
+          ]
+        : []),
       {
         type: "section",
         text: {
