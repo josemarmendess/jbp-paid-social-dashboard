@@ -4,6 +4,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { getCronConfig, getPreviewBuffer } from "@/lib/cron/storage";
 import { fetchPaidSocialDataDirect } from "@/lib/fetchData";
 import { renderDailySummaryImage } from "@/lib/reports/renderImage";
+import { buildDailySummaryText } from "@/lib/reports/slackTextSummary";
 import { DAILY_SUMMARY_DEFAULT_CONFIG } from "@/lib/reportTemplates";
 import {
   completeUpload,
@@ -140,15 +141,18 @@ export async function POST(req: Request) {
       // 2. Fallback: re-render using the operator's saved
       //    reportConfig in KV (NOT the hardcoded default) when the
       //    cache has expired or never populated.
+      // We always need a fresh fetch for the text summary (MTD numbers
+      // shouldn't drift between approval and send). The buffer path
+      // still prefers the cached bytes for the image itself.
+      const data = await fetchPaidSocialDataDirect();
+      if (!data) throw new Error("fetchPaidSocialDataDirect returned null");
+      const cron = await getCronConfig("daily-summary");
+      const reportConfig = cron.reportConfig ?? DAILY_SUMMARY_DEFAULT_CONFIG;
       let buffer = await getPreviewBuffer("daily-summary");
       if (!buffer) {
-        const data = await fetchPaidSocialDataDirect();
-        if (!data) throw new Error("fetchPaidSocialDataDirect returned null");
-        const cron = await getCronConfig("daily-summary");
-        const reportConfig =
-          cron.reportConfig ?? DAILY_SUMMARY_DEFAULT_CONFIG;
         buffer = await renderDailySummaryImage(data, reportConfig);
       }
+      const summaryText = buildDailySummaryText(data, reportConfig);
       const filename = sanitizeFilename(value.title) + ".png";
       const upload = await getUploadUrl(token, filename, buffer.byteLength);
       if (!upload.ok) {
@@ -157,12 +161,18 @@ export async function POST(req: Request) {
         );
       }
       await uploadBytesToSlack(upload.upload_url, buffer);
+      const approvedCaption = [
+        `*${value.title}* · ${value.dateLabel} CT · approved by <@${payload.user?.id ?? approverName}>`,
+        summaryText ? `\n${summaryText}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
       const complete = await completeUpload(
         token,
         upload.file_id,
         filename,
         value.target,
-        `*${value.title}* · ${value.dateLabel} CT · approved by <@${payload.user?.id ?? approverName}>`,
+        approvedCaption,
       );
       if (!complete.ok) {
         throw new Error(
