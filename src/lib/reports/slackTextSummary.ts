@@ -11,26 +11,23 @@ import { PIVOT_ROWS, type PivotRowDef } from "@/lib/pivotConfig";
 import {
   type DailySummaryConfig,
   type DailySummaryMetric,
-  type DailySummaryPeriod,
 } from "@/lib/reportTemplates";
 import type { PaidSocialPayload } from "@/lib/types";
 
 /**
  * Build the mrkdwn text summary that accompanies the Slack preview/approval
  * card. Same metrics the user picked for the report image, "All services"
- * only (no per-service split), for the highlighted period column. Falls
- * back to Yesterday when no hero period is set.
+ * only (no per-service split). The text rollup is ALWAYS Month-to-Date —
+ * regardless of which column the image highlights — because the operator
+ * uses it to track the running month on Slack.
  */
 export function buildDailySummaryText(
   data: PaidSocialPayload,
   config: DailySummaryConfig,
 ): string {
-  const heroKey: DailySummaryPeriod = config.heroPeriod ?? "yesterday";
   const periods = getPivotPeriods();
   const period =
-    periods.find((p) => p.key === heroKey) ??
-    periods.find((p) => p.key === "yesterday") ??
-    periods[0];
+    periods.find((p) => p.key === "month_to_date") ?? periods[0];
 
   return formatPeriodSummary(data, period, config.metrics);
 }
