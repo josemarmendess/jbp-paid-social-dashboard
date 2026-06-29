@@ -1,9 +1,18 @@
 import type { PaidSocialPayload, MetaInsightRow, ServiceTitanRow } from "./types";
 
-function daysAgo(n: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
-  return d.toISOString().slice(0, 10);
+// Fixed anchor date — avoids new Date() which is banned during Next.js prerender.
+const ANCHOR = new Date("2026-06-29T12:00:00Z");
+
+// Deterministic seeded PRNG (mulberry32) — Math.random() is banned during prerender.
+let seed = 0x12345678;
+function rand(): number {
+  seed ^= seed << 13;
+  seed ^= seed >> 17;
+  seed ^= seed << 5;
+  return (seed >>> 0) / 0xffffffff;
+}
+function rnd(min: number, max: number) {
+  return min + rand() * (max - min);
 }
 
 const CAMPAIGNS = [
@@ -29,13 +38,9 @@ const ADS = [
   "SEW_V3_Blockage_Carousel",
 ];
 
-function rnd(min: number, max: number) {
-  return min + Math.random() * (max - min);
-}
-
 function buildMetaRows(): MetaInsightRow[] {
   const rows: MetaInsightRow[] = [];
-  const today = new Date();
+  const today = new Date(ANCHOR);
 
   for (let day = 89; day >= 0; day--) {
     const d = new Date(today);
@@ -67,7 +72,7 @@ function buildMetaRows(): MetaInsightRow[] {
         cpm: Math.round((spend / impressions) * 1000 * 100) / 100,
         results,
         cost_per_result: Math.round((spend / results) * 100) / 100,
-        last_updated_at: new Date().toISOString(),
+        last_updated_at: ANCHOR.toISOString(),
       });
     }
   }
@@ -80,7 +85,7 @@ const BOOKED_BY = ["Sarah K.", "Mike T.", "Linda R.", "Tom W."];
 
 function buildSTRows(): ServiceTitanRow[] {
   const rows: ServiceTitanRow[] = [];
-  const today = new Date();
+  const today = new Date(ANCHOR);
 
   for (let day = 89; day >= 0; day--) {
     const d = new Date(today);
@@ -89,9 +94,9 @@ function buildSTRows(): ServiceTitanRow[] {
     const leadsToday = Math.round(rnd(2, 8));
 
     for (let i = 0; i < leadsToday; i++) {
-      const bu = Math.random() > 0.45 ? "Bathrooms" : "Sewers";
+      const bu = rand() > 0.45 ? "Bathrooms" : "Sewers";
       const campaign = CAMPAIGNS.find((c) => c.bu === bu)!;
-      const statusIdx = Math.floor(Math.random() * STATUSES.length);
+      const statusIdx = Math.floor(rand() * STATUSES.length);
       const status = STATUSES[statusIdx];
       const revenue = status === "Cancelled" ? 0 : Math.round(rnd(bu === "Bathrooms" ? 4200 : 1800, bu === "Bathrooms" ? 18000 : 6500));
       const sales = status === "Cancelled" ? 0 : Math.round(rnd(revenue * 0.6, revenue * 0.9));
@@ -105,7 +110,7 @@ function buildSTRows(): ServiceTitanRow[] {
         "Booking Method": BOOKING_METHODS[i % BOOKING_METHODS.length],
         "Job Status": status,
         "Booked By": BOOKED_BY[i % BOOKED_BY.length],
-        "Zip Code": 30301 + Math.floor(Math.random() * 50),
+        "Zip Code": 30301 + Math.floor(rand() * 50),
         "Sales": sales,
         "Revenue": revenue,
         "Business Unit": bu,
@@ -119,8 +124,9 @@ function buildSTRows(): ServiceTitanRow[] {
 }
 
 export function getMockPayload(): PaidSocialPayload {
+  seed = 0x12345678; // reset seed for deterministic output
   return {
-    generated_at: new Date().toISOString(),
+    generated_at: ANCHOR.toISOString(),
     meta_account_id: 1234567890,
     meta_insights: buildMetaRows(),
     servicetitan_social_leads: buildSTRows(),
