@@ -1,6 +1,7 @@
 import "server-only";
 import { cacheLife, cacheTag } from "next/cache";
 import type { PaidSocialPayload } from "./types";
+import { getMockPayload } from "./mockData";
 
 /**
  * Inner cached fetch — only the network/parse side. Env-var validation lives
@@ -19,12 +20,12 @@ import type { PaidSocialPayload } from "./types";
  */
 async function fetchCached(url: string): Promise<PaidSocialPayload> {
   "use cache";
-  cacheLife({ revalidate: 1800, expire: 3600 });
+  cacheLife({ revalidate: 14400, expire: 28800 });
   cacheTag("paid-social");
 
   const t0 = Date.now();
   const res = await fetch(url, {
-    next: { revalidate: 1800, tags: ["paid-social"] },
+    next: { revalidate: 14400, tags: ["paid-social"] },
     redirect: "follow",
   });
   const fetchMs = Date.now() - t0;
@@ -54,6 +55,11 @@ async function fetchCached(url: string): Promise<PaidSocialPayload> {
  * banner in those cases.
  */
 export async function fetchPaidSocialData(): Promise<PaidSocialPayload | null> {
+  if (process.env.DEMO_MODE === "1") {
+    console.log("[paid-social] DEMO_MODE — returning mock payload.");
+    return getMockPayload();
+  }
+
   const baseUrl = process.env.APPS_SCRIPT_URL;
   const token = process.env.APPS_SCRIPT_TOKEN;
   if (!baseUrl || !token) {
