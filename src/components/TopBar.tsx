@@ -1,8 +1,6 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
-import { useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { FreshnessIndicator } from "@/components/FreshnessIndicator";
 import { usePaidSocialData } from "@/components/PaidSocialDataProvider";
@@ -18,8 +16,6 @@ export function TopBar() {
   const searchParams = useSearchParams();
   const qsString = searchParams?.toString() ?? "";
   const qs = qsString ? `?${qsString}` : "";
-  const [logoOk, setLogoOk] = useState(true);
-
   return (
     <header
       style={{
@@ -37,32 +33,20 @@ export function TopBar() {
           aria-label="Overview"
           style={{ display: "block", lineHeight: 0 }}
         >
-          {logoOk ? (
-            <Image
-              src="/logo-jbp.png"
-              alt="J. Blanton Plumbing"
-              width={140}
-              height={32}
-              priority
-              onError={() => setLogoOk(false)}
-              style={{ height: 32, width: "auto", display: "block" }}
-            />
-          ) : (
-            <span
-              style={{
-                fontFamily: "var(--font-display)",
-                fontSize: 18,
-                fontWeight: 800,
-                letterSpacing: "-0.02em",
-                color: "var(--color-jbp-red)",
-              }}
-            >
-              J.BLANTON
-              <span style={{ marginLeft: 4, color: "var(--color-jbp-text)" }}>
-                PLUMBING
-              </span>
+          <span
+            style={{
+              fontFamily: "var(--font-display)",
+              fontSize: 17,
+              fontWeight: 700,
+              letterSpacing: "0.01em",
+              color: "var(--color-text-primary)",
+            }}
+          >
+            Paid Social
+            <span style={{ marginLeft: 4, fontWeight: 400, color: "var(--color-text-tertiary)" }}>
+              Dashboard
             </span>
-          )}
+          </span>
         </Link>
         <span
           style={{

@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import Image from "next/image";
 import { usePathname, useSearchParams } from "next/navigation";
 import {
   LayoutDashboard,
@@ -14,7 +13,6 @@ import {
   History as HistoryIcon,
   Settings as SettingsIcon,
 } from "lucide-react";
-import { useState } from "react";
 
 interface NavItem {
   href: string;
@@ -37,9 +35,6 @@ const NAV: NavItem[] = [
 export function Sidebar() {
   const pathname = usePathname() ?? "/";
   const searchParams = useSearchParams();
-  // Logo gracefully degrades if file is missing — we render text fallback.
-  const [logoOk, setLogoOk] = useState(true);
-
   // Persist URL filters across page nav so the global date/BU filters don't reset
   // when the user clicks a nav item.
   const qsString = searchParams?.toString() ?? "";
@@ -52,27 +47,15 @@ export function Sidebar() {
     >
       <div className="flex h-16 items-center border-b border-[color:var(--color-border-subtle)] px-5">
         <Link href={`/${qs}`} className="block transition-opacity hover:opacity-80">
-          {logoOk ? (
-            <Image
-              src="/logo-jbp.png"
-              alt="J. Blanton Plumbing"
-              width={180}
-              height={40}
-              priority
-              onError={() => setLogoOk(false)}
-              className="h-9 w-auto"
-            />
-          ) : (
-            <span
-              className="font-display text-[color:var(--color-jbp-red)]"
-              style={{ fontSize: 22, letterSpacing: "0.04em" }}
-            >
-              J.BLANTON
-              <span className="ml-1 text-[color:var(--color-text-primary)]">
-                PLUMBING
-              </span>
+          <span
+            className="font-display text-[color:var(--color-text-primary)]"
+            style={{ fontSize: 17, fontWeight: 700, letterSpacing: "0.01em" }}
+          >
+            Paid Social
+            <span className="ml-1 text-[color:var(--color-text-tertiary)]" style={{ fontWeight: 400 }}>
+              Dashboard
             </span>
-          )}
+          </span>
         </Link>
       </div>
 
@@ -117,34 +100,10 @@ export function Sidebar() {
         })}
       </nav>
 
-      <SidebarMascot />
-
       <div className="border-t border-[color:var(--color-border-subtle)] px-5 py-3 text-[10px] uppercase tracking-[0.08em] text-[color:var(--color-text-tertiary)]">
-        Made for the JBP team
+        Demo mode
       </div>
     </aside>
   );
 }
 
-/**
- * Sidebar-anchored mascot — sits just above the "Made for the JBP team"
- * footer at full opacity, gently breathing in place. Hides itself if the
- * asset is missing so the layout stays clean.
- */
-function SidebarMascot() {
-  const [ok, setOk] = useState(true);
-  if (!ok) return null;
-  return (
-    <div className="flex items-end justify-center px-2 pb-1 pt-2">
-      <Image
-        src="/mascot.png"
-        alt=""
-        width={220}
-        height={260}
-        onError={() => setOk(false)}
-        className="block h-auto w-[140px] select-none"
-        style={{ filter: "drop-shadow(0 4px 12px rgba(26,15,11,0.10))" }}
-      />
-    </div>
-  );
-}
